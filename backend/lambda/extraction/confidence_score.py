@@ -3,7 +3,6 @@
 #
 # Post-processes extracted criteria, applies confidence thresholds.
 # Any field with confidence < 0.7 gets flagged with needsReview: true.
-# Incorporates Gemini verification issues to further reduce confidence.
 #
 # Enhanced per policy-pdf-analysis.md Section 7.7:
 #   - Payer-specific confidence calibration targets
@@ -12,8 +11,7 @@
 #   - Missing initialAuthDurationMonths penalty
 #
 # Step Functions I/O:
-#   Input:  { ..., extractedCriteria: [...], verificationResult: {...},
-#             payerName, documentClass, ... }
+#   Input:  { ..., extractedCriteria: [...], payerName, documentClass, ... }
 #   Output: { ..., extractedCriteria: [...] (updated), reviewCount }
 
 import json
@@ -24,7 +22,6 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 CONFIDENCE_THRESHOLD = 0.7
-GEMINI_PENALTY = 0.15
 
 # ── Payer-specific confidence calibration (Section 7.7) ──────────────────
 
@@ -54,8 +51,7 @@ PAYER_CONFIDENCE_RULES: dict[str, dict] = {
 }
 
 
-def _score_record(record: dict, gemini_issues: list[dict],
-                  payer_name: str, doc_class: str) -> dict:
+def _score_record(record: dict, payer_name: str, doc_class: str) -> dict:
     """Apply confidence rules and needsReview flagging to a single record.
 
     Enhanced with payer-specific calibration from Section 7.7 of the analysis.
@@ -139,20 +135,6 @@ def _score_record(record: dict, gemini_issues: list[dict],
         confidence -= 0.05 * complex_count
         review_reasons.append(f"Multiple conditional logic markers detected ({complex_count})")
 
-    # ── Cross-reference Gemini verification issues ───────────────────────
-
-    drug = record.get("drugName", "").lower()
-    indication = record.get("indicationName", "").lower()
-    for issue in gemini_issues:
-        issue_field = issue.get("field", "").lower()
-        if drug in issue_field or indication in issue_field or issue_field in str(record).lower():
-            confidence -= GEMINI_PENALTY
-            review_reasons.append(
-                f"Gemini flagged: {issue.get('field')} "
-                f"(extracted={issue.get('extractedValue')}, "
-                f"correct={issue.get('correctValue')})"
-            )
-
     # ── Clamp and flag ───────────────────────────────────────────────────
 
     confidence = max(0.0, min(1.0, confidence))
@@ -175,8 +157,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     logger.info(json.dumps({"state": "ConfidenceScoring", "policyDocId": event.get("policyDocId")}))
 
     criteria: list[dict] = event.get("extractedCriteria", [])
-    verification: dict = event.get("verificationResult", {})
-    gemini_issues: list[dict] = verification.get("issues", [])
     payer_name: str = event.get("payerName", "")
     doc_class: str = event.get("documentClass", "drug_specific")
 
@@ -193,7 +173,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     scored_criteria: list[dict] = []
 
     for record in criteria:
-        scored = _score_record(record, gemini_issues, payer_name, doc_class)
+        scored = _score_record(record, payer_name, doc_class)
         if scored.get("needsReview"):
             review_count += 1
         scored_criteria.append(scored)
@@ -211,8 +191,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         "avgConfidence": round(sum(confidences) / len(confidences), 3) if confidences else 0,
         "minConfidence": round(min(confidences), 3) if confidences else 0,
         "maxConfidence": round(max(confidences), 3) if confidences else 0,
-        "geminiIssuesCount": len(gemini_issues),
-        "geminiVerificationStatus": verification.get("status", "unknown"),
         "payerName": payer_name,
         "extractionPromptUsed": event.get("extractionPromptUsed", "unknown"),
     }

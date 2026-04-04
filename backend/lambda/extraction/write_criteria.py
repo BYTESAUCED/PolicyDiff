@@ -128,7 +128,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # 2. Update policy document status
     review_count = confidence_summary.get("reviewCount", 0)
-    status = "complete" if review_count == 0 else "complete"  # always complete, but summary has review info
+    status = "review_required" if review_count > 0 else "complete"
 
     _update_policy_status(policy_doc_id, status, records_written, confidence_summary)
 

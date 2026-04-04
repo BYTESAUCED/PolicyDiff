@@ -52,6 +52,8 @@ class PolicyDiffComputeStack(cdk.Stack):
             "APPROVAL_PATHS_TABLE": storage_stack.approval_paths_table.table_name,
             "USER_PREFERENCES_TABLE": storage_stack.user_preferences_table.table_name,
             "REGION": cdk.Aws.REGION,
+            # Fix 3: BEDROCK_MODEL_ID was missing — all Bedrock Lambdas need this
+            "BEDROCK_MODEL_ID": bedrock_model_arn,
         }
 
         # ── Lambda definitions ────────────────────────────────────────────────
@@ -172,6 +174,74 @@ class PolicyDiffComputeStack(cdk.Stack):
             },
         )
 
+        # ── Extraction pipeline Lambdas (Fix 1) ──────────────────────────────
+
+        self.classify_document_fn = lambda_.Function(
+            self, "ClassifyDocumentLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="extraction.classify_document.lambda_handler",
+            code=lambda_code,
+            architecture=lambda_arch,
+            timeout=cdk.Duration.seconds(30),
+            memory_size=256,
+            environment=common_env,
+        )
+
+        self.assemble_text_fn = lambda_.Function(
+            self, "AssembleTextLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="extraction.assemble_text.lambda_handler",
+            code=lambda_code,
+            architecture=lambda_arch,
+            timeout=cdk.Duration.seconds(120),
+            memory_size=512,
+            environment=common_env,
+        )
+
+        self.bedrock_extract_fn = lambda_.Function(
+            self, "BedrockExtractLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="extraction.bedrock_extract.lambda_handler",
+            code=lambda_code,
+            architecture=lambda_arch,
+            timeout=cdk.Duration.seconds(300),
+            memory_size=1024,
+            environment=common_env,
+        )
+
+        self.confidence_score_fn = lambda_.Function(
+            self, "ConfidenceScoreLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="extraction.confidence_score.lambda_handler",
+            code=lambda_code,
+            architecture=lambda_arch,
+            timeout=cdk.Duration.seconds(60),
+            memory_size=256,
+            environment=common_env,
+        )
+
+        self.write_criteria_fn = lambda_.Function(
+            self, "WriteCriteriaLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="extraction.write_criteria.lambda_handler",
+            code=lambda_code,
+            architecture=lambda_arch,
+            timeout=cdk.Duration.seconds(60),
+            memory_size=256,
+            environment=common_env,
+        )
+
+        self.trigger_diff_fn = lambda_.Function(
+            self, "TriggerDiffLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="extraction.trigger_diff.lambda_handler",
+            code=lambda_code,
+            architecture=lambda_arch,
+            timeout=cdk.Duration.seconds(30),
+            memory_size=256,
+            environment=common_env,
+        )
+
         # ── IAM grants ───────────────────────────────────────────────────────
 
         # UploadUrlLambda
@@ -208,6 +278,13 @@ class PolicyDiffComputeStack(cdk.Stack):
             actions=["bedrock:InvokeModel"],
             resources=[BEDROCK_MODEL_ARN],
         ))
+        # Fix 4: query_fn needs Titan embed for semantic search + VECTORS_BUCKET_NAME
+        self.query_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=[TITAN_EMBED_ARN],
+        ))
+        self.query_fn.add_environment("VECTORS_BUCKET_NAME", storage_stack.vectors_bucket.ref)
+        self.query_fn.add_environment("TITAN_MODEL_ARN", TITAN_EMBED_ARN)
 
         # CompareLambda
         storage_stack.drug_policy_criteria_table.grant_read_data(self.compare_fn)
@@ -263,6 +340,42 @@ class PolicyDiffComputeStack(cdk.Stack):
             resources=[f"arn:aws:s3vectors:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:bucket/policydiff-vectors-{cdk.Aws.ACCOUNT_ID}-{cdk.Aws.REGION}/index/policy-criteria-index"],
         ))
 
+        # ── Extraction pipeline Lambda IAM grants (Fix 1, Fix 5) ─────────────
+
+        # ClassifyDocumentLambda — reads/writes PolicyDocuments for classification metadata
+        storage_stack.policy_documents_table.grant_read_write_data(self.classify_document_fn)
+
+        # AssembleTextLambda — reads Textract output from S3, writes structured text back (Fix 7)
+        storage_stack.policy_bucket.grant_read_write(self.assemble_text_fn)
+        storage_stack.policy_documents_table.grant_read_write_data(self.assemble_text_fn)
+
+        # BedrockExtractLambda — invokes Bedrock, reads policy docs table, writes to S3
+        storage_stack.policy_documents_table.grant_read_data(self.bedrock_extract_fn)
+        storage_stack.policy_bucket.grant_read_write(self.bedrock_extract_fn)
+        self.bedrock_extract_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=[BEDROCK_MODEL_ARN],
+        ))
+
+        # ConfidenceScoreLambda — reads DrugPolicyCriteria for calibration context
+        storage_stack.drug_policy_criteria_table.grant_read_data(self.confidence_score_fn)
+
+        # WriteCriteriaLambda — writes DrugPolicyCriteria, updates PolicyDocuments
+        storage_stack.drug_policy_criteria_table.grant_read_write_data(self.write_criteria_fn)
+        storage_stack.policy_documents_table.grant_read_write_data(self.write_criteria_fn)
+
+        # TriggerDiffLambda — reads PolicyDocuments, invokes DiffLambda async (Fix 5)
+        storage_stack.policy_documents_table.grant_read_data(self.trigger_diff_fn)
+        self.diff_fn.grant_invoke(self.trigger_diff_fn)
+        self.trigger_diff_fn.add_environment("DIFF_FUNCTION_NAME", self.diff_fn.function_name)
+
+        NagSuppressions.add_resource_suppressions(self.assemble_text_fn, [
+            {"id": "AwsSolutions-IAM5", "reason": "S3 object-level access requires key prefix wildcard"},
+        ], apply_to_children=True)
+        NagSuppressions.add_resource_suppressions(self.bedrock_extract_fn, [
+            {"id": "AwsSolutions-IAM5", "reason": "S3 object-level access requires key prefix wildcard"},
+        ], apply_to_children=True)
+
         # ── ExtractionWorkflow execution role ────────────────────────────────
 
         workflow_role = iam.Role(
@@ -281,8 +394,12 @@ class PolicyDiffComputeStack(cdk.Stack):
             actions=["bedrock:InvokeModel"],
             resources=[BEDROCK_MODEL_ARN],
         ))
-        # Allow Step Functions to invoke Lambda functions used in the workflow
-        for fn in [self.diff_fn]:
+        # Allow Step Functions to invoke all Lambda functions used in the workflow (Fix 6)
+        for fn in [
+            self.classify_document_fn, self.assemble_text_fn, self.bedrock_extract_fn,
+            self.confidence_score_fn, self.write_criteria_fn, self.trigger_diff_fn,
+            self.embed_index_fn, self.diff_fn,
+        ]:
             fn.grant_invoke(workflow_role)
 
         NagSuppressions.add_resource_suppressions(workflow_role, [
@@ -340,15 +457,23 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         assemble_text = sfn_tasks.LambdaInvoke(
             self, "AssembleStructuredText",
-            lambda_function=self.policy_crud_fn,
+            lambda_function=self.assemble_text_fn,
             payload=sfn.TaskInput.from_json_path_at("$"),
             result_path="$.assembleResult",
             payload_response_only=True,
         )
 
+        classify_document = sfn_tasks.LambdaInvoke(
+            self, "ClassifyDocument",
+            lambda_function=self.classify_document_fn,
+            payload=sfn.TaskInput.from_json_path_at("$"),
+            result_path="$.classifyResult",
+            payload_response_only=True,
+        )
+
         bedrock_extraction = sfn_tasks.LambdaInvoke(
             self, "BedrockSchemaExtraction",
-            lambda_function=self.query_fn,
+            lambda_function=self.bedrock_extract_fn,
             payload=sfn.TaskInput.from_json_path_at("$"),
             result_path="$.extractionResult",
             payload_response_only=True,
@@ -356,7 +481,7 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         confidence_scoring = sfn_tasks.LambdaInvoke(
             self, "ConfidenceScoring",
-            lambda_function=self.compare_fn,
+            lambda_function=self.confidence_score_fn,
             payload=sfn.TaskInput.from_json_path_at("$"),
             result_path="$.scoringResult",
             payload_response_only=True,
@@ -364,7 +489,7 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         write_to_dynamo = sfn_tasks.LambdaInvoke(
             self, "WriteToDynamoDB",
-            lambda_function=self.policy_crud_fn,
+            lambda_function=self.write_criteria_fn,
             payload=sfn.TaskInput.from_json_path_at("$"),
             result_path="$.writeResult",
             payload_response_only=True,
@@ -372,16 +497,14 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         execution_complete = sfn.Succeed(self, "ExecutionComplete")
 
-        invoke_diff_async = sfn_tasks.LambdaInvoke(
-            self, "InvokeDiffAsync",
-            lambda_function=self.diff_fn,
-            invocation_type=sfn_tasks.LambdaInvocationType.EVENT,
+        # ADR: TriggerDiffLambda as SFN state | Lambda handles previousVersionId check + async diff invoke
+        trigger_diff_state = sfn_tasks.LambdaInvoke(
+            self, "TriggerDiffIfVersionExists",
+            lambda_function=self.trigger_diff_fn,
             payload=sfn.TaskInput.from_json_path_at("$"),
-            result_path=sfn.JsonPath.DISCARD,
+            result_path="$.triggerDiffResult",
+            payload_response_only=True,
         )
-
-        trigger_diff_choice = sfn.Choice(self, "TriggerDiffIfVersionExists")
-        has_previous_version = sfn.Condition.is_present("$.previousVersionId")
 
         # State 6.5 — EmbedAndIndex (non-blocking: catches all errors and continues)
         embed_and_index = sfn_tasks.LambdaInvoke(
@@ -392,7 +515,7 @@ class PolicyDiffComputeStack(cdk.Stack):
             payload_response_only=True,
         )
         embed_and_index.add_catch(
-            trigger_diff_choice,
+            trigger_diff_state,
             errors=["States.ALL"],
             result_path="$.embedError",
         )
@@ -411,11 +534,7 @@ class PolicyDiffComputeStack(cdk.Stack):
             .otherwise(wait_for_textract.next(poll_textract))
         )
 
-        diff_branch = (
-            trigger_diff_choice
-            .when(has_previous_version, invoke_diff_async.next(execution_complete))
-            .otherwise(execution_complete)
-        )
+        diff_branch = trigger_diff_state.next(execution_complete)
 
         definition = sfn.Chain.start(
             start_textract
@@ -423,11 +542,12 @@ class PolicyDiffComputeStack(cdk.Stack):
             .next(textract_complete)
         )
         # Chain after poll_loop resolves to assemble_text path
-        assemble_text.next(bedrock_extraction)
+        assemble_text.next(classify_document)
+        classify_document.next(bedrock_extraction)
         bedrock_extraction.next(confidence_scoring)
         confidence_scoring.next(write_to_dynamo)
         write_to_dynamo.next(embed_and_index)
-        embed_and_index.next(trigger_diff_choice)
+        embed_and_index.next(trigger_diff_state)
 
         # ADR: Express Workflow | Cost-effective for short-lived executions (<5 min)
         self.extraction_workflow = sfn.StateMachine(
@@ -466,7 +586,16 @@ class PolicyDiffComputeStack(cdk.Stack):
             ),
         )
         extraction_rule.add_target(
-            targets.SfnStateMachine(self.extraction_workflow)
+            targets.SfnStateMachine(
+                self.extraction_workflow,
+                # ADR: EventBridge input transformer | Maps S3 event shape to workflow input shape
+                input=events.RuleTargetInput.from_object({
+                    "bucketName": events.EventField.from_path("$.detail.bucket.name"),
+                    "s3Key": events.EventField.from_path("$.detail.object.key"),
+                    # policyDocId is parsed from key format raw/{policyDocId}.pdf by assemble_text_fn
+                    "policyDocId": events.EventField.from_path("$.detail.object.key"),
+                }),
+            )
         )
 
         # Daily trigger for PolicyMonitorLambda
@@ -483,6 +612,8 @@ class PolicyDiffComputeStack(cdk.Stack):
             self.query_fn, self.compare_fn, self.diff_fn,
             self.discordance_fn, self.approval_path_fn, self.simulator_fn,
             self.embed_index_fn,
+            self.classify_document_fn, self.assemble_text_fn, self.bedrock_extract_fn,
+            self.confidence_score_fn, self.write_criteria_fn, self.trigger_diff_fn,
         ]
 
         for fn in _lambda_fns:
@@ -497,6 +628,9 @@ class PolicyDiffComputeStack(cdk.Stack):
         _dynamo_gsi_fns = [
             self.policy_crud_fn, self.query_fn, self.compare_fn, self.diff_fn,
             self.discordance_fn, self.approval_path_fn, self.simulator_fn,
+            self.bedrock_extract_fn, self.write_criteria_fn, self.trigger_diff_fn,
+            self.classify_document_fn, self.assemble_text_fn, self.confidence_score_fn,
+            self.policy_monitor_fn,
         ]
         for fn in _dynamo_gsi_fns:
             NagSuppressions.add_resource_suppressions(fn, [

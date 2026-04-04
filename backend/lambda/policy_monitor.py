@@ -1,6 +1,11 @@
 # Owner: AZ
 # PolicyMonitorLambda — monitors S3 inbox/ prefix for new PDFs, moves to raw/ to trigger extraction.
 # Triggered by: EventBridge Scheduler (daily)
+#
+# NOTE: Auto-scraping payer websites is not feasible for hackathon scope.
+# Aetna CPBs are HTML-only (no PDF endpoint). Cigna blocks automated requests.
+# UHC requires navigating a search UI. Workflow: manually download PDFs and
+# drop into the inbox/ prefix, or upload via the UI at POST /api/policies/upload-url.
 
 import json
 import logging
@@ -42,7 +47,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         for page in pages:
             for obj in page.get("Contents", []):
                 source_key = obj["Key"]
-                # Skip the prefix placeholder itself
                 if source_key == "inbox/" or not source_key.endswith(".pdf"):
                     continue
 
@@ -57,9 +61,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 s3_client.delete_object(Bucket=bucket_name, Key=source_key)
 
                 logger.info(json.dumps({
-                    "action": "inbox_file_detected",
+                    "action": "inbox_file_moved",
                     "policyDocId": policy_doc_id,
-                    "dest_key": dest_key,
+                    "sourceKey": source_key,
+                    "destKey": dest_key,
                 }))
                 processed += 1
 

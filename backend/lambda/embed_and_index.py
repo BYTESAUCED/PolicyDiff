@@ -150,7 +150,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                             "drugName": drug_name,
                             "indicationName": indication_name,
                             "effectiveDate": effective_date,
-                            "chunkText": chunk[:500],
+                            "chunkText": chunk[:256],
                         },
                     }],
                 )

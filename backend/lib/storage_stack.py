@@ -8,6 +8,7 @@ from aws_cdk import (
     aws_s3vectors as s3vectors,
 )
 from constructs import Construct
+from cdk_nag import NagSuppressions
 
 
 class PolicyDiffStorageStack(cdk.Stack):
@@ -181,6 +182,14 @@ class PolicyDiffStorageStack(cdk.Stack):
             distance_metric="cosine",
         )
         self.vectors_index.add_dependency(self.vectors_bucket)
+
+        # ADR: cdk-nag suppressions | S3 access logs omitted (cost); BucketNotificationsHandler uses AWS managed policy (CDK internal)
+        NagSuppressions.add_resource_suppressions(self.policy_bucket, [
+            {"id": "AwsSolutions-S1", "reason": "Server access logging omitted for cost; acceptable for hackathon scope"},
+        ])
+        NagSuppressions.add_stack_suppressions(self, [
+            {"id": "AwsSolutions-IAM4", "reason": "BucketNotificationsHandler is a CDK internal construct using AWSLambdaBasicExecutionRole; cannot be modified"},
+        ])
 
         # CloudFormation exports
         cdk.CfnOutput(self, "DocumentsBucketArn", value=self.policy_bucket.bucket_arn, export_name="DocumentsBucketArn")
