@@ -24,12 +24,13 @@ DOCUMENTS_BUCKET_NAME = os.environ.get("DOCUMENTS_BUCKET_NAME", "")
 VECTORS_BUCKET_NAME = os.environ.get("VECTORS_BUCKET_NAME", "")
 TITAN_MODEL_ARN = os.environ.get("TITAN_MODEL_ARN", "")
 
-if not DOCUMENTS_BUCKET_NAME:
-    raise ValueError("DOCUMENTS_BUCKET_NAME env var is not set")
-if not VECTORS_BUCKET_NAME:
-    raise ValueError("VECTORS_BUCKET_NAME env var is not set")
-if not TITAN_MODEL_ARN:
-    raise ValueError("TITAN_MODEL_ARN env var is not set")
+for _var, _val in [
+    ("DOCUMENTS_BUCKET_NAME", DOCUMENTS_BUCKET_NAME),
+    ("VECTORS_BUCKET_NAME", VECTORS_BUCKET_NAME),
+    ("TITAN_MODEL_ARN", TITAN_MODEL_ARN),
+]:
+    if not _val:
+        logger.warning(json.dumps({"warning": "missing_env_var", "var": _var}))
 
 # ── Module-level AWS clients (reused across warm invocations) ─────────────────
 
@@ -94,6 +95,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Embed rawExcerpt text chunks and write vectors to S3 Vectors."""
     policy_doc_id = event.get("policyDocId", "unknown")
     logger.info(json.dumps({"state": "EmbedAndIndex", "policyDocId": policy_doc_id}))
+
+    if not VECTORS_BUCKET_NAME or not TITAN_MODEL_ARN:
+        logger.warning(json.dumps({"action": "skip_embed", "reason": "missing env vars", "policyDocId": policy_doc_id}))
+        return {**event, "vectorsIndexed": 0, "vectorsError": "missing env vars"}
 
     excerpt_keys: list[str] = event.get("excerptKeys", [])
     bucket = event.get("s3Bucket", DOCUMENTS_BUCKET_NAME)

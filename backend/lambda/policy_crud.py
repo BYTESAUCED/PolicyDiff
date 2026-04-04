@@ -71,13 +71,21 @@ def require_admin(event: dict) -> bool:
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     logger.info(json.dumps({
         "action": "policy_crud_request",
-        "httpMethod": event.get("httpMethod"),
-        "resource": event.get("resource"),
+        "httpMethod": event.get("httpMethod") or (event.get("requestContext") or {}).get("http", {}).get("method"),
+        "resource": event.get("resource") or event.get("rawPath"),
         "requestId": (event.get("requestContext") or {}).get("requestId"),
     }))
 
-    http_method = event.get("httpMethod", "")
-    resource = event.get("resource", "")
+    # ADR: Support both REST API V1 (httpMethod/resource) and HTTP API V2 (requestContext.http.method/rawPath)
+    http_method = (
+        event.get("httpMethod")
+        or (event.get("requestContext") or {}).get("http", {}).get("method", "")
+    ).upper()
+    resource = (
+        event.get("resource")
+        or event.get("rawPath")
+        or ""
+    )
 
     try:
         # POST /api/policies — create policy record (admin only)
@@ -85,15 +93,15 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return handle_create_policy(event)
 
         # GET /api/policies/{id}/status
-        elif http_method == "GET" and resource == "/api/policies/{id}/status":
+        elif http_method == "GET" and (resource == "/api/policies/{id}/status" or resource.endswith("/status")):
             return handle_get_status(event)
 
         # GET /api/policies/{id}/criteria
-        elif http_method == "GET" and resource == "/api/policies/{id}/criteria":
+        elif http_method == "GET" and (resource == "/api/policies/{id}/criteria" or resource.endswith("/criteria")):
             return handle_get_criteria(event)
 
         # GET /api/policies/{id}
-        elif http_method == "GET" and resource == "/api/policies/{id}":
+        elif http_method == "GET" and (resource == "/api/policies/{id}" or (resource.startswith("/api/policies/") and resource.count("/") == 3)):
             return handle_get_policy(event)
 
         # GET /api/policies — list with optional filters
@@ -101,7 +109,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return handle_list_policies(event)
 
         # DELETE /api/policies/{id} (admin only)
-        elif http_method == "DELETE" and resource == "/api/policies/{id}":
+        elif http_method == "DELETE" and (resource == "/api/policies/{id}" or resource.startswith("/api/policies/")):
             return handle_delete_policy(event)
 
         # GET /api/users/me/preferences

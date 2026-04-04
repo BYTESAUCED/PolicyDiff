@@ -49,8 +49,6 @@ if not auth0_audience:
     _log.warning("AUTH0_AUDIENCE not set — JWT authorizer will be disabled. Set it in backend/.env")
 if not auth0_client_id:
     _log.warning("AUTH0_CLIENT_ID not set — frontend Auth0 config will be empty. Set it in backend/.env")
-if not github_oauth_token:
-    _log.warning("GITHUB_OAUTH_TOKEN not set — Amplify GitHub connection will use placeholder. Set it in backend/.env")
 
 # ── CDK App ───────────────────────────────────────────────────────────────────
 
