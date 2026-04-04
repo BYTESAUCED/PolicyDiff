@@ -1094,18 +1094,28 @@ This is the primary demo screen. Must be visually undeniable.
 # - DiffLambda (timeout: 120s)
 # - DiscordanceLambda (timeout: 60s)
 # - ApprovalPathLambda (timeout: 90s)
+# - PolicyMonitorLambda (timeout: 60s) — S3 inbox auto-ingestion, daily schedule
 # - SimulatorLambda (timeout: 60s, stretch)
 
-# Step Functions Express Workflow: ExtractionWorkflow
-# EventBridge rule: S3 upload → Step Functions trigger
+# Step Functions Express Workflow: ExtractionWorkflow (7 states, no Gemini)
+# EventBridge rule: S3 raw/ prefix → Step Functions trigger
+# EventBridge Scheduler: daily → PolicyMonitorLambda
 
 # IAM roles per Lambda (least privilege):
 # - S3: GetObject, PutObject on policydiff-documents bucket
 # - DynamoDB: specific table ARNs only
-# - Bedrock: InvokeModel on claude-sonnet-4-5 ARN
+# - Bedrock Claude Sonnet: InvokeModel on anthropic.claude-sonnet-4-5 ARN
+#   → QueryLambda, CompareLambda, DiffLambda, ApprovalPathLambda, ExtractionWorkflow role
+# - Bedrock Titan Embeddings: InvokeModel on amazon.titan-embed-text-v2:0 ARN  [NEW]
+#   → write_criteria Lambda (Step 6) — generates embeddings for S3 Vectors
+#   → QueryLambda — embeds user query for vector similarity search
+# - S3 Vectors: PutVectors on policydiff-vectors bucket  [NEW]
+#   → write_criteria Lambda (Step 6)
+# - S3 Vectors: QueryVectors on policydiff-vectors bucket  [NEW]
+#   → QueryLambda
 # - Textract: StartDocumentAnalysis, GetDocumentAnalysis
-# - Secrets Manager: GetSecretValue on policydiff/* (for Gemini key)
 # - Step Functions: StartExecution (for ExtractionWorkflow trigger)
+# - Auth0 JWT authorizer: all routes protected, role claim checked in Lambda
 ```
 
 #### `PolicyDiffApiStack`
@@ -1119,10 +1129,16 @@ This is the primary demo screen. Must be visually undeniable.
 
 #### `PolicyDiffFrontendStack`
 ```python
-# Amplify App connected to GitHub repo
-# Build settings: npm run build, output dist/
-# Environment variables: VITE_API_BASE_URL
-# Custom domain: optional if time permits
+# NOTE: FrontendStack is NOT deployed via CDK — Amplify is connected manually
+# through the AWS Console (GitHub OAuth connection, build settings, env vars).
+# The CDK stack exists for IaC documentation purposes only.
+#
+# Amplify App: connected to github.com/opatel04/PolicyDiff, main branch
+# Build settings: cd frontend && npm ci && npm run build, output frontend/dist/
+# Environment variables (set in Amplify console):
+#   VITE_API_BASE_URL  — from ApiStack CfnOutput ApiInvokeUrl
+#   VITE_AUTH0_DOMAIN  — Auth0 tenant domain
+#   VITE_AUTH0_CLIENT_ID — Auth0 SPA client ID
 ```
 
 ---
