@@ -298,6 +298,12 @@ def handle_list_policies(event: dict) -> dict:
         result = table.scan(**scan_kwargs)
 
     response_body: dict = {"items": result.get("Items", [])}
+    # Apply drugName client-side filter (PolicyDocuments doesn't have a drugName GSI)
+    if drug_name:
+        response_body["items"] = [
+            i for i in response_body["items"]
+            if i.get("drugName", "").lower() == drug_name.lower()
+        ]
     last_key = result.get("LastEvaluatedKey")
     if last_key:
         response_body["nextToken"] = json.dumps(last_key)
@@ -318,8 +324,16 @@ def handle_delete_policy(event: dict) -> dict:
         return create_response(400, {"message": "Missing path parameter: id"})
 
     table = dynamodb.Table(table_name)
-    table.delete_item(Key={"policyDocId": policy_doc_id})
-    logger.info(json.dumps({"action": "policy_deleted", "policyDocId": policy_doc_id}))
+    # ADR: Soft delete | Set extractionStatus = "deleted" to preserve audit trail and diff history
+    table.update_item(
+        Key={"policyDocId": policy_doc_id},
+        UpdateExpression="SET extractionStatus = :s, deletedAt = :d",
+        ExpressionAttributeValues={
+            ":s": "deleted",
+            ":d": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    logger.info(json.dumps({"action": "policy_soft_deleted", "policyDocId": policy_doc_id}))
     return create_response(200, {"deleted": True})
 
 

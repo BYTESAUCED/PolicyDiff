@@ -345,10 +345,20 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     logger.info(json.dumps({"state": "AssembleStructuredText", "event_keys": list(event.keys())}))
 
-    policy_doc_id: str = event["policyDocId"]
     s3_bucket: str = event["s3Bucket"]
     payer_name: str = event.get("payerName", "")
     doc_class: str = event.get("documentClass", "drug_specific")
+
+    # Parse policyDocId from s3Key if not explicitly provided
+    # EventBridge passes s3Key = "raw/{policyDocId}/raw.pdf"; we extract index 1
+    policy_doc_id: str = event.get("policyDocId") or ""
+    if not policy_doc_id:
+        s3_key = event.get("s3Key", "")
+        parts = s3_key.strip("/").split("/")
+        if len(parts) >= 2:
+            policy_doc_id = parts[1]  # raw/{policyDocId}/raw.pdf → index 1
+    if not policy_doc_id:
+        raise ValueError("policyDocId missing and could not be parsed from s3Key")
 
     # ── PDF path: Textract ────────────────────────────────────────────────
     # ADR: textractOutputKey derived from OutputConfig path | StartDocumentAnalysis writes blocks to
@@ -435,6 +445,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     return {
         **event,
+        "policyDocId": policy_doc_id,
         "structuredTextS3Key": structured_key,
         "pageCount": page_count,
         "sectionCount": len(sections),

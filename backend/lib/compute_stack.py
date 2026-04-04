@@ -592,8 +592,7 @@ class PolicyDiffComputeStack(cdk.Stack):
                 input=events.RuleTargetInput.from_object({
                     "s3Bucket": events.EventField.from_path("$.detail.bucket.name"),
                     "s3Key": events.EventField.from_path("$.detail.object.key"),
-                    # policyDocId is parsed from key format raw/{policyDocId}/raw.pdf by assemble_text_fn
-                    "policyDocId": events.EventField.from_path("$.detail.object.key"),
+                    # ADR: policyDocId parsed from s3Key by assemble_text_fn | EventBridge can't split strings
                 }),
             )
         )

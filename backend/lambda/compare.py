@@ -250,13 +250,21 @@ def compare_export(params: dict) -> dict:
 
 # ── Router ────────────────────────────────────────────────────────────────
 
+def _get_method_and_path(event: dict) -> tuple[str, str]:
+    """Support both REST API v1 and HTTP API v2 event shapes."""
+    if "requestContext" in event and "http" in event.get("requestContext", {}):
+        ctx = event["requestContext"]["http"]
+        return ctx.get("method", ""), event.get("rawPath", "")
+    return event.get("httpMethod", ""), event.get("resource", "")
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     logger.info(json.dumps({"event_keys": list(event.keys())}))
 
-    if event.get("httpMethod") == "OPTIONS":
+    http_method, resource = _get_method_and_path(event)
+    if http_method == "OPTIONS":
         return {"statusCode": 200, "headers": _cors_headers(), "body": ""}
 
-    resource = event.get("resource", "")
     query_params = event.get("queryStringParameters") or {}
 
     try:

@@ -249,6 +249,14 @@ def get_feed(params: dict) -> dict:
 
 # ── Router ────────────────────────────────────────────────────────────────
 
+def _get_method_and_path(event: dict) -> tuple[str, str]:
+    """Support both REST API v1 and HTTP API v2 event shapes."""
+    if "requestContext" in event and "http" in event.get("requestContext", {}):
+        ctx = event["requestContext"]["http"]
+        return ctx.get("method", ""), event.get("rawPath", "")
+    return event.get("httpMethod", ""), event.get("resource", "")
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     logger.info(json.dumps({"event_keys": list(event.keys())}))
 
@@ -257,20 +265,24 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         result = compute_temporal_diff(event)
         return result
 
-    # Handle CORS preflight
-    if event.get("httpMethod") == "OPTIONS":
+    http_method, resource = _get_method_and_path(event)
+    if http_method == "OPTIONS":
         return {"statusCode": 200, "headers": _cors_headers(), "body": ""}
 
-    http_method = event.get("httpMethod", "")
-    resource = event.get("resource", "")
     path_params = event.get("pathParameters") or {}
+    if not path_params:
+        parts = resource.strip("/").split("/")
+        # /api/diffs/{diffId} → parts = ["api", "diffs", "<id>"]
+        if len(parts) == 3 and parts[1] == "diffs" and parts[2] != "feed":
+            path_params = {"diffId": parts[2]}
+
     query_params = event.get("queryStringParameters") or {}
 
     try:
         if http_method == "GET" and resource == "/api/diffs/feed":
             return get_feed(query_params)
 
-        elif http_method == "GET" and resource == "/api/diffs/{diffId}":
+        elif http_method == "GET" and resource.startswith("/api/diffs/") and resource != "/api/diffs/feed":
             return get_diff(path_params.get("diffId", ""))
 
         elif http_method == "GET" and resource == "/api/diffs":

@@ -325,30 +325,102 @@ def generate_memo(approval_path_id: str, body: dict) -> dict:
             "effectiveDate": payer_score.get("effectiveDate", ""),
         })
 
-    # If not cached, need to regenerate
-    return _response(404, {
-        "error": f"No memo available for payer {payer_name}. Score must be >= 50 for memo generation.",
+    # If not cached, regenerate memo on-demand for this payer
+    drug_name = item.get("drugName", "")
+    indication_name = item.get("indicationName", "")
+    patient_profile = item.get("patientProfile", {})
+
+    payer_score = next(
+        (s for s in item.get("payerScores", []) if s.get("payerName") == payer_name),
+        {},
+    )
+    if not payer_score:
+        return _response(404, {"error": f"Payer {payer_name} not found in this approval path"})
+
+    if payer_score.get("score", 0) < 50:
+        return _response(400, {"error": f"Score {payer_score['score']}/100 is below 50 — memo generation not available for likely-denied cases"})
+
+    # Re-run Bedrock scoring for this payer to generate memo
+    criteria_table = dynamodb.Table(DRUG_POLICY_CRITERIA_TABLE)
+    result = criteria_table.query(
+        IndexName="drugName-payerName-index",
+        KeyConditionExpression=Key("drugName").eq(drug_name) & Key("payerName").eq(payer_name),
+        Limit=20,
+    )
+    payer_criteria = result.get("Items", [])
+
+    policy_title = payer_score.get("policyTitle", "Unknown Policy")
+    effective_date = payer_score.get("effectiveDate", "")
+
+    full_profile = {**patient_profile, "drugName": drug_name, "indicationName": indication_name}
+    prompt = SCORING_AND_MEMO_PROMPT.format(
+        drugName=drug_name,
+        indicationName=indication_name,
+        payerName=payer_name,
+        policyTitle=policy_title,
+        policyEffectiveDate=effective_date,
+        payerCriteriaJson=json.dumps(payer_criteria, default=str),
+        patientProfileJson=json.dumps(full_profile, default=str),
+    )
+
+    try:
+        raw = _invoke_bedrock(prompt)
+        cleaned = _clean_json(raw)
+        scoring = json.loads(cleaned)
+        memo = scoring.get("memo")
+    except Exception as e:
+        logger.error(f"Memo regeneration failed: {e}")
+        return _response(500, {"error": "Memo generation failed"})
+
+    if not memo:
+        return _response(404, {"error": "Memo could not be generated — patient may not meet criteria"})
+
+    # Cache the memo for future requests
+    approval_table.update_item(
+        Key={"approvalPathId": approval_path_id},
+        UpdateExpression="SET generatedMemos.#payer = :memo",
+        ExpressionAttributeNames={"#payer": payer_name},
+        ExpressionAttributeValues={":memo": memo},
+    )
+
+    return _response(200, {
+        "memoText": memo,
+        "citations": [],
+        "policyTitle": policy_title,
+        "effectiveDate": effective_date,
     })
 
 
 # ── Router ────────────────────────────────────────────────────────────────
 
+def _get_method_and_path(event: dict) -> tuple[str, str]:
+    """Support both REST API v1 and HTTP API v2 event shapes."""
+    if "requestContext" in event and "http" in event.get("requestContext", {}):
+        ctx = event["requestContext"]["http"]
+        return ctx.get("method", ""), event.get("rawPath", "")
+    return event.get("httpMethod", ""), event.get("resource", "")
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     logger.info(json.dumps({"event_keys": list(event.keys())}))
 
-    if event.get("httpMethod") == "OPTIONS":
+    http_method, resource = _get_method_and_path(event)
+    if http_method == "OPTIONS":
         return {"statusCode": 200, "headers": _cors_headers(), "body": ""}
 
-    http_method = event.get("httpMethod", "")
-    resource = event.get("resource", "")
     path_params = event.get("pathParameters") or {}
+    if not path_params:
+        parts = resource.strip("/").split("/")
+        # /api/approval-path/{id}/memo → parts = ["api", "approval-path", "<id>", "memo"]
+        if len(parts) == 4 and parts[1] == "approval-path":
+            path_params = {"id": parts[2]}
 
     try:
         if http_method == "POST" and resource == "/api/approval-path":
             body = json.loads(event.get("body") or "{}")
             return score_approval_path(body)
 
-        elif http_method == "POST" and resource == "/api/approval-path/{id}/memo":
+        elif http_method == "POST" and resource.endswith("/memo"):
             body = json.loads(event.get("body") or "{}")
             return generate_memo(path_params.get("id", ""), body)
 

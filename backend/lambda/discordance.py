@@ -283,17 +283,30 @@ def get_discordance_detail(drug: str, payer: str) -> dict:
 
 # ── Router ────────────────────────────────────────────────────────────────
 
+def _get_method_and_path(event: dict) -> tuple[str, str]:
+    """Support both REST API v1 and HTTP API v2 event shapes."""
+    if "requestContext" in event and "http" in event.get("requestContext", {}):
+        ctx = event["requestContext"]["http"]
+        return ctx.get("method", ""), event.get("rawPath", "")
+    return event.get("httpMethod", ""), event.get("resource", "")
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     logger.info(json.dumps({"event_keys": list(event.keys())}))
 
-    if event.get("httpMethod") == "OPTIONS":
+    http_method, resource = _get_method_and_path(event)
+    if http_method == "OPTIONS":
         return {"statusCode": 200, "headers": _cors_headers(), "body": ""}
 
-    resource = event.get("resource", "")
     path_params = event.get("pathParameters") or {}
+    if not path_params:
+        parts = resource.strip("/").split("/")
+        # /api/discordance/{drug}/{payer} → parts = ["api", "discordance", "<drug>", "<payer>"]
+        if len(parts) == 4 and parts[1] == "discordance":
+            path_params = {"drug": parts[2], "payer": parts[3]}
 
     try:
-        if resource == "/api/discordance/{drug}/{payer}":
+        if resource.startswith("/api/discordance/") and http_method == "GET":
             return get_discordance_detail(
                 path_params.get("drug", ""),
                 path_params.get("payer", ""),

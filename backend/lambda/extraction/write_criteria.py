@@ -73,10 +73,37 @@ def _update_policy_status(
     status: str,
     indications_found: int,
     confidence_summary: dict,
+    event: dict | None = None,
 ) -> None:
-    """Update the PolicyDocuments table with extraction results."""
+    """Update the PolicyDocuments table with extraction results.
+
+    ADR: Race condition guard | EventBridge fires before POST /api/policies creates the
+    PolicyDocuments record. Use update_item with attribute_not_exists guard to create a
+    minimal stub record if it doesn't exist yet, preserving any existing metadata.
+    """
     table = dynamodb.Table(POLICY_DOCUMENTS_TABLE)
     now = datetime.now(timezone.utc).isoformat()
+
+    # First try to create a stub record if it doesn't exist (handles race condition)
+    if event:
+        try:
+            table.put_item(
+                Item={
+                    "policyDocId": policy_doc_id,
+                    "payerName": event.get("payerName", "Unknown"),
+                    "planType": event.get("planType", ""),
+                    "documentTitle": event.get("documentTitle", ""),
+                    "effectiveDate": event.get("effectiveDate", ""),
+                    "s3Key": event.get("s3Key", ""),
+                    "extractionStatus": "extracting",
+                    "createdAt": now,
+                    "updatedAt": now,
+                },
+                ConditionExpression="attribute_not_exists(policyDocId)",
+            )
+            logger.info(f"Created stub PolicyDocuments record for {policy_doc_id} (race condition guard)")
+        except Exception:
+            pass  # Record already exists — that's fine, proceed to update
 
     update_expr = (
         "SET extractionStatus = :s, "
@@ -115,7 +142,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     if not criteria:
         logger.warning(f"No criteria to write for policy {policy_doc_id}")
-        _update_policy_status(policy_doc_id, "complete", 0, confidence_summary)
+        _update_policy_status(policy_doc_id, "complete", 0, confidence_summary, event)
         return {
             **event,
             "writeStatus": "complete",
@@ -130,7 +157,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     review_count = confidence_summary.get("reviewCount", 0)
     status = "review_required" if review_count > 0 else "complete"
 
-    _update_policy_status(policy_doc_id, status, records_written, confidence_summary)
+    _update_policy_status(policy_doc_id, status, records_written, confidence_summary, event)
 
     return {
         **event,

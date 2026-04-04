@@ -331,26 +331,38 @@ def _convert_floats(obj: Any) -> Any:
 
 # ── Router ────────────────────────────────────────────────────────────────
 
+def _get_method_and_path(event: dict) -> tuple[str, str]:
+    """Support both REST API v1 and HTTP API v2 event shapes."""
+    if "requestContext" in event and "http" in event.get("requestContext", {}):
+        ctx = event["requestContext"]["http"]
+        return ctx.get("method", ""), event.get("rawPath", "")
+    return event.get("httpMethod", ""), event.get("resource", "")
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     logger.info(json.dumps({"event_keys": list(event.keys())}))
 
-    if event.get("httpMethod") == "OPTIONS":
+    http_method, resource = _get_method_and_path(event)
+    if http_method == "OPTIONS":
         return {"statusCode": 200, "headers": _cors_headers(), "body": ""}
 
-    http_method = event.get("httpMethod", "")
-    resource = event.get("resource", "")
     path_params = event.get("pathParameters") or {}
+    if not path_params:
+        parts = resource.strip("/").split("/")
+        # /api/query/{queryId} → parts = ["api", "query", "<id>"]
+        if len(parts) == 3 and parts[1] == "query":
+            path_params = {"queryId": parts[2]}
 
     try:
         if http_method == "POST" and resource == "/api/query":
             body = json.loads(event.get("body") or "{}")
             return submit_query(body)
 
-        elif http_method == "GET" and resource == "/api/query/{queryId}":
-            return get_query(path_params.get("queryId", ""))
-
         elif http_method == "GET" and resource == "/api/queries":
             return list_queries()
+
+        elif http_method == "GET" and resource.startswith("/api/query/"):
+            return get_query(path_params.get("queryId", ""))
 
         else:
             return _response(404, {"error": "Not found"})
