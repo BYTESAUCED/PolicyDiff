@@ -1,0 +1,89 @@
+@import "tailwindcss";
+@import "ag-grid-community/styles/ag-grid.css";
+@import "ag-grid-community/styles/ag-theme-alpine.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-destructive: #ef4444;
+  --color-warning: #eab308;
+  --color-success: #22c55e;
+  --color-neutral: #6b7280;
+  --color-accent: #3b82f6;
+
+  --color-background: #111113;
+  --color-card: #1c1c1e;
+  --color-border: #1f1f22;
+  --color-primary-text: #f1f5f9;
+  --color-muted-text: #94a3b8;
+
+  --font-sans: "Inter", var(--font-geist-sans);
+  --font-mono: "JetBrains Mono", var(--font-geist-mono);
+}
+
+:root {
+  --background: #111113;
+  --foreground: #f1f5f9;
+  --card: #1c1c1e;
+  --card-foreground: #f1f5f9;
+  --popover: #1c1c1e;
+  --popover-foreground: #f1f5f9;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #333333;
+  --secondary-foreground: #f1f5f9;
+  --muted: #333333;
+  --muted-foreground: #94a3b8;
+  --accent: #3b82f6;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #f1f5f9;
+  --border: #1f1f22;
+  --input: #333333;
+  --ring: #3b82f6;
+  --radius: 0.25rem;
+  --sidebar: #1c1c1e;
+  --sidebar-foreground: #f1f5f9;
+  --sidebar-primary: #3b82f6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #262626;
+  --sidebar-accent-foreground: #f1f5f9;
+  --sidebar-border: #1f1f22;
+  --sidebar-ring: #3b82f6;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+}
+
+.dark {
+  --sidebar: #1c1c1e;
+  --sidebar-foreground: #f1f5f9;
+  --sidebar-primary: #3b82f6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #262626;
+  --sidebar-accent-foreground: #f1f5f9;
+  --sidebar-border: #1f1f22;
+  --sidebar-ring: #3b82f6;
+}
+
+@theme inline {
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}

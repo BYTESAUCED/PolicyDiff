@@ -1,3 +1,149 @@
+Om Patel
+leomessi.30
+Online
+
+AtharvaZ
+ added 
+Om Patel
+ to the group. — Yesterday at 14:02
+AtharvaZ — Yesterday at 14:05
+Added a frnd of mine
+we are 4 now
+https://www.innovationhacks.dev/#about
+Innovation Hacks 2026
+Innovation Hacks 2026 - ASU's Premier Student-Led Hackathon by The AI Society, GDG ASU, and SoDA
+AtharvaZ — 11:35
+hi guys 
+@everyone
+# PreVisit — Kiro Spec Document
+**Version:** 1.0  
+**Last Updated:** April 2026  
+**Stack:** React (webapp) · AWS CDK · Lambda · API Gateway · DynamoDB · S3 · Bedrock Claude Sonnet · HealthScribe · Textract · Rekognition · Polly · SNS · Amplify Hosting  
+**Region:** us-east-1 (required — HealthScribe only available here)
+
+previsit-spec.md
+41 KB
+here is the full spec doc
+please read through it once, so we dont have confusions during coding, and then I have assigned each of us work, we can always change. 
+AtharvaZ — 13:44
+Whats your name @Wen12 ?
+Wen12 — 14:41
+Can call me Dominic
+AtharvaZ — 14:41
+okay, are you serious about the hackathon?
+Wen12 — 14:43
+I wouldn’t be here if I’m not
+AtharvaZ — 14:43
+ouk
+Wen12 — 18:47
+Are any of u guys at the event now?
+MV [OAI],  — 18:47
+No waiting in line
+AtharvaZ — 18:50
+We both are on the way
+20 mins max
+Wen12 — 18:51
+Ok we are in line
+Wen12 — 18:59
+Are u guys here?
+Om Patel [KING],  — 19:04
+Nope on the way
+MV [OAI],  — 19:12
+Guys theres almost no space 
+@AtharvaZ @Om Patel
+I guess we sit separately
+Om Patel [KING],  — 19:23
+Yep
+AtharvaZ — 19:25
+Tracks?
+Annoynced?
+Om Patel [KING],  — 19:27
+Yes they will post the slides on discord
+We can do team registration later i guess after the ceremony
+MV [OAI],  — 19:28
+Ahh what track are we doing ?
+Om Patel [KING],  — 19:28
+Not decided
+We can talk later ig, personally the anton rx track seems fun
+MV [OAI],  — 19:40
+@AtharvaZ @Om Patel
+Meet outside ?
+AtharvaZ — 19:41
+We are outside
+Where are you guys?
+Wen12 — 19:43
+We outside
+Image
+MV [OAI],  — 20:56
+Attachment file type: acrobat
+anton-rx-track-spec.pdf
+441.10 KB
+Om Patel [KING],  — 22:25
+Interactive "Policy Simulator"
+A drag-and-drop interface where a consultant can ask "What if Aetna added a biosimilar-first requirement like UHC?" and the system models the impact — how many more step therapy barriers, which patients would be affected, estimated cost shift. This is the kind of thing that makes judges lean forward.
+AtharvaZ — 22:33
+file:///Users/atharvazaveri/Downloads/Innovation-Hacks-Opening-Ceremony.pdf
+AtharvaZ — 22:52
+# PolicyDiff — Kiro Spec
+**Version:** 1.0  
+**Last Updated:** April 2026  
+**Hackathon Track:** Anton RX — Medical Benefit Drug Policy Tracker  
+**Gemini API Note:** Gemini API integration is included as a separate judging track requirement. All core features use AWS Bedrock (Claude Sonnet). Gemini is used exclusively for the cross-model comparison layer described in Section 9.
+... (7 KB left)
+
+policydiff-spec.md
+57 KB
+MV [OAI],  — 22:55
+BYTESAUCED
+Wen12 — 22:55
+D0min1c
+Om Patel [KING],  — 23:03
+# PolicyDiff — Kiro Spec
+**Version:** 1.0  
+**Last Updated:** April 2026  
+**Hackathon Track:** Anton RX — Medical Benefit Drug Policy Tracker  
+**Gemini API Note:** Gemini API integration is included as a separate judging track requirement. All core features use AWS Bedrock (Claude Sonnet). Gemini is used exclusively for the cross-model comparison layer described in Section 9.
+... (7 KB left)
+
+policydiff-spec-nextjs.md
+57 KB
+AtharvaZ — 23:18
+Commit Message Format
+Standard commit message format for this project.
+
+Format
+<type>(<optional scope>): <description>
+
+<optional body>
+
+<optional footer>
+
+
+Types
+feat: New feature
+fix: Bug fix
+refactor: Code restructure without behavior change
+perf: Performance improvement
+style: Code style changes (formatting, whitespace)
+test: Test changes
+docs: Documentation only
+build: Build system changes
+ops: Infrastructure, deployment, CI/CD
+chore: Maintenance tasks
+
+Rules
+Use imperative mood: "add" not "added"
+Don't capitalize first letter
+No period at end
+Add ! before : for breaking changes
+Keep description concise
+
+Examples
+feat(email-dispatch): implement SES integration
+fix(api): correct request body checksum
+docs: update deployment guide
+build: update dependencies
+﻿
 # PolicyDiff — Kiro Spec
 **Version:** 1.0  
 **Last Updated:** April 2026  
@@ -63,13 +209,14 @@ PolicyDiff is a four-layer system:
 - **Orchestration:** AWS Step Functions (Express Workflows)
 - **Storage:** S3 (raw PDFs, Textract output), DynamoDB (all structured data), S3 Vectors (semantic search index for query interface)
 - **OCR:** AWS Textract (TABLES + FORMS mode)
+<<<<<<< HEAD
 - **AI — Primary:** AWS Bedrock, Claude Sonnet `anthropic.claude-sonnet-4-5` (us-east-1)
 - **AI — Embeddings:** AWS Bedrock, Titan Embeddings v2 `amazon.titan-embed-text-v2:0` (us-east-1) — used for S3 Vectors indexing
-- **Hosting:** AWS Amplify (React app, connected manually via console)
+- **Hosting:** AWS Amplify (Next.js app, connected manually via console)
+- **Region:** us-east-1
 
 ### Frontend
-- React 18 + Vite
-- React Router v6
+- Next.js 14 (App Router, static export via `output: 'export'`)
 - TanStack Query v5 (data fetching + polling)
 - Tailwind CSS
 - Recharts (trend charts)
@@ -88,7 +235,7 @@ PolicyDiff is a four-layer system:
 
 ```
 User (Browser)
-    └── Amplify Hosting (React + Vite)
+    └── Amplify Hosting (Next.js static export)
             └── API Gateway (REST, HTTPS, us-east-1)
                     ├── POST /api/policies/upload-url      → UploadUrlLambda
                     ├── POST /api/policies                 → PolicyCrudLambda
@@ -1172,11 +1319,11 @@ This is the primary demo screen. Must be visually undeniable.
 # The CDK stack exists for IaC documentation purposes only.
 #
 # Amplify App: connected to github.com/opatel04/PolicyDiff, main branch
-# Build settings: cd frontend && npm ci && npm run build, output frontend/dist/
+# Build settings: cd frontend && npm ci && npm run build, output frontend/.next/
 # Environment variables (set in Amplify console):
-#   VITE_API_BASE_URL  — from ApiStack CfnOutput ApiInvokeUrl
-#   VITE_AUTH0_DOMAIN  — Auth0 tenant domain
-#   VITE_AUTH0_CLIENT_ID — Auth0 SPA client ID
+#   NEXT_PUBLIC_API_BASE_URL — from ApiStack CfnOutput ApiInvokeUrl
+#   NEXT_PUBLIC_AUTH0_DOMAIN — Auth0 tenant domain
+#   NEXT_PUBLIC_AUTH0_CLIENT_ID — Auth0 SPA client ID
 ```
 
 ---
@@ -1191,8 +1338,8 @@ This is the primary demo screen. Must be visually undeniable.
 4. PolicyCrudLambda: create + get + list endpoints
 
 **Om:**
-5. React app scaffolded: Vite + Tailwind + React Router + TanStack Query
-6. Routing setup: all 8 screens stubbed with placeholder content
+5. Next.js app scaffolded: App Router + Tailwind + TanStack Query + shadcn/ui init
+6. Routing setup: all 8 screens stubbed as route files under `app/` with placeholder content
 7. Dashboard shell with hardcoded stats
 
 **Dominic:**
@@ -1268,93 +1415,4 @@ This is the primary demo screen. Must be visually undeniable.
 **All:**
 38. Pre-load 3 real policy documents with validated DynamoDB seed data (extract offline — have clean data ready regardless of live extraction)
 39. Dashboard stats populated from real data
-40. Fallback data: pre-computed query responses, pre-rendered comparison results, pre-computed diff for UHC Jan 2025 → Feb 2026
-41. End-to-end demo rehearsal — 3 full runs, timed to 4 minutes
-42. Gemini integration verified working (or graceful fallback)
-
-**Stretch (if time):**
-43. Policy Simulator: editor UI + SimulatorLambda + matrix column injection
-
----
-
-## 14. Pre-Hackathon Data Preparation
-
-**Must complete before hackathon starts:**
-
-Download these real publicly available PDFs:
-1. **UHC infliximab (Feb 2026)** — `uhcprovider.com/en/policies-protocols/commercial-policies/commercial-medical-drug-policies` → search "Infliximab" (~29 pages, 10+ indications)
-2. **UHC infliximab (Jan 2025)** — find via archive or Wayback Machine — needed for temporal diff
-3. **Aetna infliximab Clinical Policy Bulletin** — `aetna.com/health-care-professionals/clinical-policy-bulletins`
-4. **Cigna infliximab Coverage Policy** — `static.cigna.com/assets/chcp/pdf/coveragePolicies/medical/`
-5. **One Aetna pharmacy benefit formulary** — for ustekinumab discordance demo
-
-Pre-extract offline using the extraction prompt and seed DynamoDB before the hackathon starts. Have clean, validated JSON ready. The live extraction feature is for judges to see the pipeline — the comparison matrix and query features must work against pre-loaded data regardless.
-
-**Validated seed data needed for:**
-- Infliximab × rheumatoid arthritis × UHC, Aetna, Cigna (comparison matrix)
-- Infliximab × Crohn's disease × UHC, Aetna (coverage check query)
-- UHC infliximab temporal diff (Jan 2025 → Feb 2026) — 3+ changes with different severity levels
-- Ustekinumab medical vs. pharmacy discordance for Aetna (pre-computed, 4 vs 2 prior therapy requirement)
-
----
-
-## 15. Demo Script (Target: 4 Minutes)
-
-**Setup:** Pre-load all seed data. Have all 5 fallback screenshots ready if any live feature fails.
-
-**Flow:**
-
-**0:00 — Hook (20 seconds)**  
-"Anton RX consultants spend 3 days per drug building what you're about to see in 15 seconds. PolicyDiff turns payer PDFs into structured, comparable, queryable data — and then closes the loop by generating the actual prior auth letter."
-
-**0:20 — Dashboard (15 seconds)**  
-Show dashboard. Point at stats: 3 policies, 2 payers, 4 changes detected. "This is what we know."
-
-**0:35 — Upload (30 seconds)**  
-Drag Cigna infliximab PDF. Show Step Functions progress animation. "Extracting text... Parsing structure... 8 indications found... Writing records." Pre-computed data loads. "Done."
-
-**1:05 — Comparison Matrix (60 seconds)**  
-Navigate to Comparison Matrix. Select infliximab + rheumatoid arthritis. Matrix appears.  
-Point at cells: "UHC requires a 14-week biosimilar trial before Remicade — that's a BREAKING change from last year. Aetna requires 12 weeks. Cigna has no step therapy requirement at all. This took us 3 seconds. It took their consultant 3 days."
-
-**2:05 — Temporal Diff (30 seconds)**  
-Click Change Feed tab. Show UHC Jan 2025 → Feb 2026 diff. Point at red BREAKING badge: "Biosimilar-first requirement added. Patients on Remicade today just lost coverage. This would have been missed until the next manual review cycle."
-
-**2:35 — Discordance (20 seconds)**  
-Discordance Alerts. Show ustekinumab / Aetna card. "Medical benefit requires 4 prior therapy failures. Pharmacy benefit requires 2. Same drug, same payer, different rules. Published research says 14% of policies have this problem. We find it automatically."
-
-**2:55 — Approval Path Generator (60 seconds)**  
-Navigate to Approval Path Generator. Input patient: rheumatoid arthritis, failed Inflectra 14 weeks, rheumatologist.  
-Score cards appear: Aetna 92 — Likely Approved. UHC 61 — Gap Detected. Cigna 88 — Likely Approved.  
-Click "Generate PA Letter" for Aetna. Memo appears. Read first line: "Per Aetna's Clinical Policy Bulletin for Infliximab, effective February 2026, the patient meets initial authorization criteria as follows..."  
-"This letter, in the payer's own language, citing their own policy. Ready to submit."
-
-**3:55 — Close (5 seconds)**  
-"PolicyDiff. From PDF to prior auth letter in under 4 minutes."
-
----
-
-## 16. Risk Mitigation
-
-| Risk | Mitigation |
-|---|---|
-| Textract takes too long for live demo | Pre-compute all seed data. Show progress animation over pre-loaded results. |
-| Bedrock extraction quality low for complex PDFs | Spend most prompt engineering time on this. Have manual override: pre-validated JSON can be injected directly. |
-| Gemini API rate limit | Wrap in try/catch. Log error, continue extraction without verification step. Extraction doesn't fail. |
-| AG Grid comparison matrix performance | Limit demo to 3 payers × 10 dimensions. Pre-load data client-side. No live API call during demo. |
-| Step Functions timeout | Set maximum 5-minute timeout. Show "extraction taking longer than expected, loading cached data" gracefully. |
-| Live query gives wrong answer | Pre-compute 6 demo queries and store in QueryLog. Query interface shows recent queries on load — judges can see realistic results. |
-
----
-
-## 17. Judging Criteria Alignment
-
-| Criterion | How PolicyDiff addresses it |
-|---|---|
-| **Problem fit** | Directly solves Anton RX's stated #1 pain point. Consultants manually read PDFs — PolicyDiff automates this. |
-| **Technical depth** | Domain-specific schema extraction, Step Functions orchestration, GSI-optimized DynamoDB queries, multi-model AI (Bedrock + Gemini) |
-| **Uniqueness** | No existing product does cross-payer medical benefit drug policy comparison. Pharmacy benefit tools exist. Medical benefit does not. |
-| **Demo clarity** | Comparison matrix is visually undeniable in 10 seconds. Approval Path Generator produces a holdable deliverable. |
-| **Real data** | All policy documents are real UHC/Aetna/Cigna PDFs. The ustekinumab discordance finding comes from a peer-reviewed JMCP study. Judges can verify. |
-| **AWS usage** | S3, DynamoDB, Lambda, Step Functions, API Gateway, Textract, Bedrock, Amplify, Secrets Manager, EventBridge, IAM — full stack. |
-| **Gemini track** | Cross-model verification layer using Gemini 1.5 Pro with genuine purpose: increases extraction reliability for clinical data. |
+40. Fallback data: pre-computed quer... (7 KB left)
