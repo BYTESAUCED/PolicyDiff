@@ -5,10 +5,31 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Search, Filter, ChevronDown, ChevronRight, TableProperties } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+    Search,
+    Filter,
+    ChevronDown,
+    ChevronRight,
+    TableProperties,
+    FileTextIcon,
+    Loader2,
+    Trash2Icon,
+} from "lucide-react";
 import Link from "next/link";
 
-const drugsData = [
+interface Drug {
+    id: string;
+    name: string;
+    brandNames: string;
+    payers: string[];
+    indications: number;
+    lastUpdated: string;
+}
+
+type DrugActionType = "compare" | "view" | "delete";
+
+const drugsData: Drug[] = [
     {
         id: "d1",
         name: "Infliximab",
@@ -46,12 +67,29 @@ const drugsData = [
 export default function DrugExplorerPage() {
     const [expandedRows, setExpandedRows] = useState<string[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
+    const [pendingAction, setPendingAction] = useState<{ id: string; type: DrugActionType } | null>(null);
 
     const toggleRow = (id: string) => {
         setExpandedRows((prev) =>
             prev.includes(id) ? prev.filter((rowId) => rowId !== id) : [...prev, id]
         );
     };
+
+    const isActionPending = (type: DrugActionType, id: string) =>
+        pendingAction?.id === id && pendingAction.type === type;
+
+    const isBusy = (id: string) => pendingAction?.id === id;
+
+    const handleAction = (drug: Drug, actionType: DrugActionType) => {
+        setPendingAction({ id: drug.id, type: actionType });
+        setTimeout(() => setPendingAction(null), 1000);
+    };
+
+    const filtered = drugsData.filter(
+        (d) =>
+            d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            d.brandNames.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     return (
         <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -78,86 +116,149 @@ export default function DrugExplorerPage() {
                 </div>
             </div>
 
-            <div className="rounded-md border border-border bg-card overflow-hidden">
+            <div className="rounded-lg border border-border">
                 <Table>
-                    <TableHeader className="bg-background/50">
-                        <TableRow className="hover:bg-transparent border-border">
-                            <TableHead className="w-10"></TableHead>
-                            <TableHead>Drug Name</TableHead>
-                            <TableHead>Brand Names</TableHead>
-                            <TableHead>Payers Covered</TableHead>
-                            <TableHead className="text-right">Indications</TableHead>
-                            <TableHead className="text-right">Last Updated</TableHead>
+                    <TableHeader>
+                        <TableRow className="border-b border-border hover:bg-transparent">
+                            <TableHead className="h-12 w-10 px-4" />
+                            <TableHead className="h-12 px-4 font-medium">Drug Name</TableHead>
+                            <TableHead className="h-12 px-4 font-medium">Brand Names</TableHead>
+                            <TableHead className="h-12 px-4 font-medium">Payers</TableHead>
+                            <TableHead className="h-12 px-4 font-medium">Indications</TableHead>
+                            <TableHead className="h-12 px-4 font-medium">Last Updated</TableHead>
+                            <TableHead className="h-12 w-[140px] px-4 font-medium">Actions</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {drugsData.map((drug) => (
-                            <React.Fragment key={drug.id}>
-                                <TableRow
-                                    className={`cursor-pointer hover:bg-white/5 border-border ${expandedRows.includes(drug.id) ? "bg-white/5" : ""}`}
-                                    onClick={() => toggleRow(drug.id)}
-                                >
-                                    <TableCell>
-                                        {expandedRows.includes(drug.id) ? (
-                                            <ChevronDown className="h-4 w-4 text-muted-text" />
-                                        ) : (
-                                            <ChevronRight className="h-4 w-4 text-muted-text" />
-                                        )}
-                                    </TableCell>
-                                    <TableCell className="font-mono font-medium text-primary-text">{drug.name}</TableCell>
-                                    <TableCell className="text-muted-text text-sm">{drug.brandNames}</TableCell>
-                                    <TableCell>
-                                        <div className="flex flex-wrap gap-1">
-                                            {drug.payers.map((payer) => (
-                                                <Badge key={payer} variant="outline" className="text-[10px] bg-background/50 text-muted-text border-border">
-                                                    {payer}
-                                                </Badge>
-                                            ))}
-                                        </div>
-                                    </TableCell>
-                                    <TableCell className="text-right font-mono text-sm">{drug.indications}</TableCell>
-                                    <TableCell className="text-right text-sm text-muted-text">{drug.lastUpdated}</TableCell>
-                                </TableRow>
+                        {filtered.map((drug) => {
+                            const expanded = expandedRows.includes(drug.id);
+                            const busy = isBusy(drug.id);
 
-                                {expandedRows.includes(drug.id) && (
-                                    <TableRow className="bg-black/40 border-border">
-                                        <TableCell colSpan={6} className="p-0">
-                                            <div className="p-6 border-l-2 border-primary ml-[22px] my-2">
-                                                <div className="flex items-center justify-between mb-4">
-                                                    <h4 className="font-semibold text-sm">Policy Documents ({drug.payers.length})</h4>
-                                                    <Button size="sm" asChild>
-                                                        <Link href={`/compare?drug=${drug.name.toLowerCase()}`}>
-                                                            <TableProperties className="h-4 w-4 mr-2" /> Compare this drug
-                                                        </Link>
-                                                    </Button>
-                                                </div>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                                    {drug.payers.map((payer) => (
-                                                        <div key={payer} className="p-3 rounded-md bg-card/60 border border-border/50 text-sm space-y-2">
-                                                            <div className="flex items-center justify-between">
-                                                                <span className="font-medium text-primary-text">{payer}</span>
-                                                                <Badge variant="success" className="text-[10px] h-4">Active</Badge>
-                                                            </div>
-                                                            <div className="flex justify-between text-muted-text text-xs">
-                                                                <span>Indications</span>
-                                                                <span className="font-mono">{Math.max(1, drug.indications - Math.floor(Math.random() * 3))}</span>
-                                                            </div>
-                                                            <div className="flex justify-between text-muted-text text-xs cursor-pointer hover:text-sky-500">
-                                                                <span>View criteria</span>
-                                                                <ChevronRight className="h-3 w-3" />
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
+                            return (
+                                <React.Fragment key={drug.id}>
+                                    <TableRow
+                                        className={`cursor-pointer hover:bg-muted/50 border-border ${expanded ? "bg-muted/30" : ""}`}
+                                        onClick={() => toggleRow(drug.id)}
+                                    >
+                                        <TableCell className="h-16 px-4">
+                                            {expanded
+                                                ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                                : <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                            }
+                                        </TableCell>
+                                        <TableCell className="h-16 px-4 font-mono font-medium">{drug.name}</TableCell>
+                                        <TableCell className="h-16 px-4 text-sm text-muted-foreground">{drug.brandNames}</TableCell>
+                                        <TableCell className="h-16 px-4">
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {drug.payers.map((payer) => (
+                                                    <span
+                                                        key={payer}
+                                                        className="text-[11px] text-muted-foreground/70 border border-border rounded px-1.5 py-0.5 font-mono"
+                                                    >
+                                                        {payer}
+                                                    </span>
+                                                ))}
                                             </div>
                                         </TableCell>
+                                        <TableCell className="h-16 px-4 font-mono text-sm">{drug.indications}</TableCell>
+                                        <TableCell className="h-16 px-4 text-sm text-muted-foreground">{drug.lastUpdated}</TableCell>
+                                        <TableCell className="h-16 px-4" onClick={(e) => e.stopPropagation()}>
+                                            <TooltipProvider>
+                                                <div className="flex items-center gap-1">
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                                                disabled={busy}
+                                                                asChild={!busy}
+                                                                onClick={() => handleAction(drug, "compare")}
+                                                            >
+                                                                {isActionPending("compare", drug.id)
+                                                                    ? <Loader2 className="size-4 animate-spin" />
+                                                                    : <Link href={`/compare?drug=${drug.name.toLowerCase()}`}><TableProperties className="size-4" /></Link>
+                                                                }
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>Compare</TooltipContent>
+                                                    </Tooltip>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                                                disabled={busy}
+                                                                onClick={() => handleAction(drug, "view")}
+                                                            >
+                                                                {isActionPending("view", drug.id)
+                                                                    ? <Loader2 className="size-4 animate-spin" />
+                                                                    : <FileTextIcon className="size-4" />
+                                                                }
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>View Details</TooltipContent>
+                                                    </Tooltip>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                                                                disabled={busy}
+                                                                onClick={() => handleAction(drug, "delete")}
+                                                            >
+                                                                {isActionPending("delete", drug.id)
+                                                                    ? <Loader2 className="size-4 animate-spin" />
+                                                                    : <Trash2Icon className="size-4" />
+                                                                }
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>Delete</TooltipContent>
+                                                    </Tooltip>
+                                                </div>
+                                            </TooltipProvider>
+                                        </TableCell>
                                     </TableRow>
-                                )}
-                            </React.Fragment>
-                        ))}
+
+                                    {expanded && (
+                                        <TableRow className="border-border hover:bg-transparent">
+                                            <TableCell colSpan={7} className="p-0">
+                                                <div className="p-6 border-l-2 border-primary ml-[22px] my-2">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                        <h4 className="font-semibold text-sm">Policy Documents ({drug.payers.length})</h4>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                                        {drug.payers.map((payer) => (
+                                                            <div key={payer} className="p-3 rounded-md border border-border text-sm space-y-2">
+                                                                <div className="flex items-center justify-between">
+                                                                    <span className="font-medium">{payer}</span>
+                                                                    <Badge variant="outline" className="border-0 bg-green-500/10 text-green-400 text-[10px] h-4">Active</Badge>
+                                                                </div>
+                                                                <div className="flex justify-between text-muted-foreground text-xs">
+                                                                    <span>Indications</span>
+                                                                    <span className="font-mono">{Math.max(1, drug.indications - Math.floor(Math.random() * 3))}</span>
+                                                                </div>
+                                                                <div className="flex justify-between text-muted-foreground text-xs cursor-pointer hover:text-sky-400 transition-colors">
+                                                                    <span>View criteria</span>
+                                                                    <ChevronRight className="h-3 w-3" />
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </React.Fragment>
+                            );
+                        })}
                     </TableBody>
                 </Table>
             </div>
         </div>
     );
 }
+
+
