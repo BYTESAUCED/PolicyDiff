@@ -47,8 +47,8 @@ PolicyDiff is a four-layer system:
 
 | Member | Role | Primary Ownership |
 |---|---|---|
-| **Mohith** | AI/ML Core | Bedrock prompts, extraction engine, query classifier, diff engine, Approval Path Generator logic, S3 Vectors write (write_criteria.py), vector-based query retrieval (query.py) |
-| **Atharva (AZ)** | Backend + Cloud Infrastructure | CDK stack, S3, DynamoDB, S3 Vectors bucket + index (StorageStack), Step Functions, API Gateway, Lambda CRUD, ingestion pipeline wiring |
+| **Atharva (AZ)** | Backend + Cloud Infrastructure + Embedding Layer | CDK stacks, S3, DynamoDB, S3 Vectors bucket + index, Step Functions wiring, API Gateway, Lambda CRUD, ingestion pipeline infrastructure (States 1–2, 6.5, 7), `embed_and_index.py` (chunking + Titan Embeddings + S3 Vectors write) |
+| **Mohith** | AI/ML Core + Extraction | Extraction logic (States 3–6: assemble_text, bedrock_extract, confidence_score, write_criteria), query classifier, diff engine, comparison matrix normalization, discordance detection, approval path generator, vector-based query retrieval (query.py) |
 | **Om** | Frontend Lead | All 8 screens, comparison matrix component, query interface, change feed, design system |
 | **Dominic** | Frontend Support | PDF upload component, drug explorer, discordance alerts view, API integration wiring on frontend |
 
@@ -244,25 +244,63 @@ S3 Upload Event
 ## 8. Feature Specifications
 
 ### Feature 1: Policy Document Ingestion Pipeline
-**Owner:** AZ (infrastructure) + Mohith (extraction logic)
+**Owner:** AZ (infrastructure + embedding/indexing layer) + Mohith (extraction logic, States 3–6)
 
-**What it does:**  
-User uploads a medical benefit drug policy PDF. System extracts structure-aware text via Textract, parses it into the DrugPolicyCriteria schema via Bedrock, stores in DynamoDB, and auto-triggers diffs if a previous version exists.
+**What it does:**
+User uploads a medical benefit drug policy PDF. Mohith's extraction pipeline (Textract + Claude) pulls structured criteria out of the messy PDFs. AZ's embedding layer then chunks the raw excerpts, embeds them via Titan, and writes vectors to S3 Vectors for semantic search. Structured data lands in DynamoDB. Vectors land in S3 Vectors. Both are used downstream.
 
-**Why this is hard:**  
-A single UHC infliximab policy is 29 pages covering 10+ indications, each with different step therapy, dosing, preferred product rules, and reauthorization criteria. Tables, nested bullet points, conditional logic ("one of the following" / "all of the following"), cross-references. Generic chunking fails here. We preserve document hierarchy through Textract's TABLES + FORMS mode.
+**Why extraction is hard (Mohith's problem):**
+Every payer formats their PDFs differently. UHC uses numbered sections with nested bullets. Aetna uses clinical policy bulletin format with tables. Cigna uses a different header hierarchy. A single UHC infliximab policy is 29 pages covering 10+ indications, each with different step therapy, dosing, preferred product rules, and reauthorization criteria. The challenges:
+- **Tables**: Textract returns table cells as disconnected blocks — row/column relationships must be reconstructed
+- **Nested conditions**: "One of the following" = OR logic. "All of the following" = AND logic. Claude must parse this correctly
+- **Indication isolation**: Each indication (RA, Crohn's, psoriasis...) has completely independent criteria — merging them is a critical error
+- **Brand vs generic**: Policy says "Remicade" but normalized name is "infliximab"
+- **Chunking**: 29-page PDF exceeds Claude's context — must chunk by indication section, not arbitrary character count
 
-**Backend flow:**
+**Mohith's extraction approach (States 3–6):**
+
+**State 3 — AssembleStructuredText** (`backend/lambda/extraction/assemble_text.py`):
+- Reconstruct Textract blocks into hierarchical structure: headers → sub-headers → bullets → nested conditions
+- Preserve table structure: reconstruct rows and cells from TABLE/CELL blocks
+- Output: `structured-text.json` with sections array
+
+**State 4 — BedrockSchemaExtraction** (`backend/lambda/extraction/bedrock_extract.py`):
+- Send each indication section separately to Claude Sonnet (not the whole document)
+- Use extraction prompt (Section 10.1) with strict JSON output
+- Handle chunking at logical boundaries (sub-headers), not character count
+- Enrich each record: add `policyDocId`, `payerName`, `effectiveDate`, `drugIndicationId`
+
+**State 5 — ConfidenceScoring** (`backend/lambda/extraction/confidence_score.py`):
+- Flag records where `confidence < 0.7` with `needsReview: true`
+- Additional flags: empty `initialAuthCriteria`, brand name in `drugName`, missing `indicationICD10`
+
+**State 6 — WriteToDynamoDB** (`backend/lambda/extraction/write_criteria.py`):
+- Batch write all DrugPolicyCriteria records to DynamoDB
+- Update PolicyDocuments `extractionStatus` to `"complete"` and `indicationsFound` count
+- Write `rawExcerpt` text to S3 at `{policyDocId}/excerpts/{drugIndicationId}.txt` for AZ's embedding step
+
+**AZ's embedding + indexing layer (State 6.5 — `backend/lambda/embed_and_index.py`):**
+
+Triggered after `write_criteria.py` completes (Step Functions chain or EventBridge on DynamoDB stream):
+- Read `rawExcerpt` text files from S3 (`{policyDocId}/excerpts/`)
+- For each excerpt:
+  - Chunk if > 512 tokens (split at sentence boundaries, not character count)
+  - Call Titan Embeddings v2 (`amazon.titan-embed-text-v2:0`) → 1536-dim vector
+  - Write to S3 Vectors with metadata: `{ policyDocId, drugName, indicationName, payerName, effectiveDate, benefitType, rawExcerpt (truncated 500 chars) }`
+- IAM needed: `bedrock:InvokeModel` on Titan Embeddings ARN + `s3vectors:PutVectors`
+
+**Full pipeline flow:**
 1. Frontend requests presigned S3 URL via `POST /api/policies/upload-url`
-2. Frontend uploads PDF directly to `s3://policydiff-docs/{policyDocId}/raw.pdf`
-3. S3 event notification triggers Step Functions ExtractionWorkflow
-4. **State 1 — StartTextractJob:** Call `textract:StartDocumentAnalysis` with `FeatureTypes: ["TABLES", "FORMS"]`. Store JobId in DynamoDB.
-5. **State 2 — PollTextractJob:** Poll every 10 seconds via EventBridge + Lambda. Timeout after 5 minutes with status `"failed"`.
-6. **State 3 — AssembleStructuredText:** Reconstruct Textract blocks into hierarchical structure: headers → sub-headers → bullet points → nested conditions. Preserve table cell relationships. Output to `s3://policydiff-docs/{policyDocId}/structured-text.json`.
-7. **State 4 — BedrockSchemaExtraction:** Send structured text + extraction prompt (Section 10.1) to `anthropic.claude-sonnet-4-5` via Bedrock. Parse JSON response into DrugPolicyCriteria records.
-8. **State 5 — ConfidenceScoring:** Any field with confidence < 0.7 flagged with `needsReview: true`. Write confidence map to DynamoDB.
-9. **State 6 — WriteToDynamoDB:** Batch write all DrugPolicyCriteria records. Update PolicyDocuments status to `"complete"`.
-10. **State 7 — TriggerDiffIfVersionExists:** If `previousVersionId` exists on the PolicyDocuments record, invoke DiffLambda asynchronously.
+2. Frontend uploads PDF to `s3://policydiff-docs/{policyDocId}/raw.pdf`
+3. S3 event → EventBridge → Step Functions ExtractionWorkflow
+4. **State 1 — StartTextractJob:** `textract:StartDocumentAnalysis` with `TABLES + FORMS`
+5. **State 2 — PollTextractJob:** Poll every 10s, timeout 5 min
+6. **State 3 — AssembleStructuredText** (Mohith)
+7. **State 4 — BedrockSchemaExtraction** (Mohith)
+8. **State 5 — ConfidenceScoring** (Mohith)
+9. **State 6 — WriteToDynamoDB** (Mohith) — also writes rawExcerpts to S3
+10. **State 6.5 — EmbedAndIndex** (AZ) — chunks + embeds + writes to S3 Vectors
+11. **State 7 — TriggerDiffIfVersionExists** (AZ) — async DiffLambda if new version
 
 **Frontend polling:**  
 Frontend polls `GET /api/policies/{policyDocId}/status` every 3 seconds. Show Step Functions state machine progress: "Extracting text... Parsing structure... Found N indications... Writing records... Complete."
