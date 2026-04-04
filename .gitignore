@@ -44,5 +44,3 @@ samconfig.toml
 *.pem
 *.key
 secrets.json
-
-policydiff-spec.md
