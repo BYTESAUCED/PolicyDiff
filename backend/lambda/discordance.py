@@ -17,27 +17,28 @@ import os
 from typing import Any
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-# TODO: validate env vars at startup (DRUG_POLICY_CRITERIA_TABLE, CORS_ORIGIN, AI_SECRET_ARN)
-# TODO: init boto3 dynamodb + secretsmanager clients at module level
+_ENV_VARS = ["DRUG_POLICY_CRITERIA_TABLE", "POLICY_DIFFS_TABLE"]
+for _var in _ENV_VARS:
+    if not os.environ.get(_var):
+        logger.warning(json.dumps({"warning": "missing_env_var", "var": _var}))
+
+
+def create_response(status_code: int, body: dict) -> dict:
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+            "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+        },
+        "body": json.dumps(body),
+    }
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    logger.info(json.dumps({"event": event}))
+    logger.info(json.dumps({"action": "discordance_request", "event": event}))
 
-    cors_origin = os.environ.get("CORS_ORIGIN", "")
-    headers = {
-        "Access-Control-Allow-Origin": cors_origin,
-        "Content-Type": "application/json",
-    }
-
-    # TODO: route on resource
-    # TODO: list — aggregate discordance scores across all drug+payer combos
-    # TODO: detail — compare payer criteria vs industry baseline via Bedrock/Gemini
-
-    return {
-        "statusCode": 200,
-        "headers": headers,
-        "body": json.dumps({"message": "DiscordanceLambda stub — implement AI logic here"}),
-    }
+    return create_response(200, {"message": "DiscordanceLambda stub — implement AI logic here"})

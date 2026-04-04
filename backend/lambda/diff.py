@@ -7,7 +7,7 @@
 #   GET /api/diffs/feed      → chronological change feed across all policies
 #
 # Expected output (getDiff):
-#   { "diffId": str, "policyId": str, "drug": str, "changes": [ { "field": str, "before": any, "after": any } ] }
+#   { "diffId": str, "drugName": str, "diffType": str, "changes": [ { "field": str, "oldValue": any, "newValue": any } ] }
 
 import json
 import logging
@@ -15,28 +15,28 @@ import os
 from typing import Any
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-# TODO: validate env vars at startup (POLICY_DIFFS_TABLE, CORS_ORIGIN)
-# TODO: init boto3 dynamodb client at module level
+_ENV_VARS = ["POLICY_DIFFS_TABLE", "DRUG_POLICY_CRITERIA_TABLE"]
+for _var in _ENV_VARS:
+    if not os.environ.get(_var):
+        logger.warning(json.dumps({"warning": "missing_env_var", "var": _var}))
+
+
+def create_response(status_code: int, body: dict) -> dict:
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+            "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+        },
+        "body": json.dumps(body),
+    }
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    logger.info(json.dumps({"event": event}))
+    logger.info(json.dumps({"action": "diff_request", "event": event}))
 
-    cors_origin = os.environ.get("CORS_ORIGIN", "")
-    headers = {
-        "Access-Control-Allow-Origin": cors_origin,
-        "Content-Type": "application/json",
-    }
-
-    # TODO: route on resource
-    # TODO: list — query PolicyDiffs GSI by policyId or timestamp
-    # TODO: get — fetch single diff by diffId
-    # TODO: feed — scan/query with timestamp sort, paginate
-
-    return {
-        "statusCode": 200,
-        "headers": headers,
-        "body": json.dumps({"message": "DiffLambda stub — implement AI logic here"}),
-    }
+    return create_response(200, {"message": "DiffLambda stub — implement AI logic here"})

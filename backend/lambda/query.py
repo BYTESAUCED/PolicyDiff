@@ -1,5 +1,5 @@
 # Owner: Mohith
-# QueryLambda — natural language query against extracted policy criteria via Bedrock/Gemini.
+# QueryLambda — natural language query against extracted policy criteria via Bedrock.
 #
 # Routes handled:
 #   POST /api/query           → submit NL query, returns queryId
@@ -19,32 +19,32 @@ import uuid
 from typing import Any
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-# TODO: validate env vars at startup (QUERY_LOG_TABLE, CORS_ORIGIN, AI_SECRET_ARN)
-# TODO: init boto3 dynamodb + secretsmanager clients at module level
+_ENV_VARS = ["QUERY_LOG_TABLE", "DRUG_POLICY_CRITERIA_TABLE", "POLICY_DOCUMENTS_TABLE", "POLICY_DIFFS_TABLE"]
+for _var in _ENV_VARS:
+    if not os.environ.get(_var):
+        logger.warning(json.dumps({"warning": "missing_env_var", "var": _var}))
+
+
+def create_response(status_code: int, body: dict) -> dict:
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+            "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+        },
+        "body": json.dumps(body),
+    }
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    logger.info(json.dumps({"event": event}))
-
-    cors_origin = os.environ.get("CORS_ORIGIN", "")
-    headers = {
-        "Access-Control-Allow-Origin": cors_origin,
-        "Content-Type": "application/json",
-    }
-
-    # TODO: route on httpMethod + resource
-    # TODO: POST — parse question, call Bedrock/Gemini, store result in QueryLog table
-    # TODO: GET /{queryId} — fetch from QueryLog table
-    # TODO: GET /queries — list recent from QueryLog table (scan with limit)
+    logger.info(json.dumps({"action": "query_request", "event": event}))
 
     query_id = str(uuid.uuid4())
-    return {
-        "statusCode": 200,
-        "headers": headers,
-        "body": json.dumps({
-            "message": "QueryLambda stub — implement AI logic here",
-            "queryId": query_id,
-        }),
-    }
+    return create_response(200, {
+        "message": "QueryLambda stub — implement AI logic here",
+        "queryId": query_id,
+    })

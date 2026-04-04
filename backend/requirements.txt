@@ -1,3 +1,5 @@
-aws-cdk-lib>=2.0.0
-constructs>=10.0.0
-boto3>=1.34.0
+aws-cdk-lib==2.248.0
+constructs==10.6.0
+boto3==1.42.83
+cdk-nag==2.37.55
+python-dotenv==1.1.0
