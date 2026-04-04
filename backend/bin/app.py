@@ -1,5 +1,5 @@
 # Owner: AZ
-# CDK app entry point — instantiates all 4 stacks in dependency order.
+# CDK app entry point — instantiates all 3 stacks in dependency order.
 # Configuration is loaded from backend/.env (copy from .env.example and fill in values).
 
 import logging
@@ -18,7 +18,6 @@ import cdk_nag
 from lib.storage_stack import PolicyDiffStorageStack
 from lib.compute_stack import PolicyDiffComputeStack
 from lib.api_stack import PolicyDiffApiStack
-from lib.frontend_stack import PolicyDiffFrontendStack
 
 _log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -30,11 +29,6 @@ cdk_account = os.environ.get("CDK_DEFAULT_ACCOUNT") or os.environ.get("CDK_DEFAU
 
 auth0_domain = os.environ.get("AUTH0_DOMAIN", "")
 auth0_audience = os.environ.get("AUTH0_AUDIENCE", "")
-auth0_client_id = os.environ.get("AUTH0_CLIENT_ID", "")
-
-github_oauth_token = os.environ.get("GITHUB_OAUTH_TOKEN", "")
-github_owner = os.environ.get("GITHUB_OWNER", "PLACEHOLDER")
-github_repo = os.environ.get("GITHUB_REPO", "policydiff")
 
 bedrock_model_arn = os.environ.get(
     "BEDROCK_MODEL_ARN",
@@ -47,9 +41,6 @@ if not auth0_domain:
     _log.warning("AUTH0_DOMAIN not set — JWT authorizer will be disabled. Set it in backend/.env")
 if not auth0_audience:
     _log.warning("AUTH0_AUDIENCE not set — JWT authorizer will be disabled. Set it in backend/.env")
-if not auth0_client_id:
-    _log.warning("AUTH0_CLIENT_ID not set — frontend Auth0 config will be empty. Set it in backend/.env")
-
 # ── CDK App ───────────────────────────────────────────────────────────────────
 
 app = cdk.App()
@@ -79,19 +70,6 @@ api = PolicyDiffApiStack(
     env=env,
 )
 api.add_dependency(compute)
-
-frontend = PolicyDiffFrontendStack(
-    app,
-    "PolicyDiffFrontendStack",
-    api_stack=api,
-    auth0_domain=auth0_domain,
-    auth0_client_id=auth0_client_id,
-    github_oauth_token=github_oauth_token,
-    github_owner=github_owner,
-    github_repo=github_repo,
-    env=env,
-)
-frontend.add_dependency(api)
 
 # ADR: cdk-nag AwsSolutionsChecks | Enforce AWS security best practices at synth time
 cdk.Aspects.of(app).add(cdk_nag.AwsSolutionsChecks(verbose=True))
