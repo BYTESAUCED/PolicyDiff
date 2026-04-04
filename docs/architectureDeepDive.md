@@ -23,15 +23,20 @@ PolicyDiff is a serverless, event-driven system on AWS (us-east-1). Four layers:
 
 ```
 Upload PDF → S3 → EventBridge → Step Functions
-  → StartTextract → PollTextract → AssembleText
-  → BedrockExtraction → GeminiVerification → ConfidenceScoring
-  → WriteDynamoDB → TriggerDiff (if version exists)
+  → ClassifyDocument (identifies payer, generates payerStructureNote)
+  → StartTextract → PollTextract
+  → AssembleText (pre-processes payer structures, adds chunkMetadata)
+  → BedrockExtraction (uses 6+ payer-specific templates, receives payerStructureNote)
+  → GeminiVerification → ConfidenceScoring
+  → WriteDynamoDB (routes payload by documentClass to DrugPolicyCriteria or FormularyEntries)
+  → TriggerDiff (if version exists)
 ```
 
 ## DynamoDB Tables
 
 - `PolicyDocuments` — PK: policyDocId
 - `DrugPolicyCriteria` — PK: policyDocId, SK: drugIndicationId
+- `FormularyEntries` — PK: hcpcsCode, SK: drugName
 - `PolicyDiffs` — PK: diffId
 - `QueryLog` — PK: queryId
 - `ApprovalPaths` — PK: approvalPathId

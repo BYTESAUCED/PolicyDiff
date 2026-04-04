@@ -60,9 +60,13 @@ The pipeline must handle these distinct document types differently — the same 
 
 | Document Type | Pipeline Treatment | Extraction Prompt |
 |---|---|---|
-| Drug-Specific Policy (PDF) | Textract → Payer-specific extraction prompt | Prompt A (UHC), Prompt C (Cigna) |
-| Drug-Specific Policy (HTML) | HTML fetch → Prompt B (Aetna) | Prompt B |
-| Preferred Specialty Management | Textract → PSM extraction | Prompt F |
+| Drug-Specific Policy (UHC Multiproduct) | Textract → _split_uhc_multiproduct | Prompt A (PROMPT_A_UHC_MULTIPRODUCT) |
+| Drug-Specific Policy (HTML) | HTML fetch → HTML ingestion | Prompt B |
+| Drug-Specific Policy (Cigna 3-Phase) | Textract → _split_cigna_3phase | Prompt C (PROMPT_C_CIGNA_3PHASE) |
+| Drug-Specific Policy (EmblemHealth) | Textract → _resolve_footnotes | Prompt G (PROMPT_G_EMBLEMHEALTH) |
+| Drug-Specific Policy (Florida Blue / MCG) | Textract → _parse_florida_blue_table_chunks | Prompt H (PROMPT_H_FLORIDA_BLUE) |
+| Formulary List (Priority Health MDL) | Textract → _batch_priority_health_formulary | Prompt B (PROMPT_B_FORMULARY_TABLE) |
+| Preferred Specialty Management (BCBS NC) | Textract → BCBS extraction routing | Prompt F (PROMPT_F_PREFERRED_PRODUCT) |
 | Maximum Dosage Policy | Textract → Supplementary dosing extraction | Prompt D |
 | Policy Update Bulletin | Textract → Change extraction | Prompt E |
 | Formulary/Drug List | Index only; do not extract clinical criteria | No extraction prompt needed |

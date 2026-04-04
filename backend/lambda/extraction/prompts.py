@@ -622,6 +622,598 @@ Document text:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Prompt A-Multiproduct — UHC Multi-Product Policy (e.g., Botulinum Toxins)
+# ─────────────────────────────────────────────────────────────────────────────
+PROMPT_A_UHC_MULTIPRODUCT = """\
+You are extracting structured medical benefit drug policy criteria from a UnitedHealthcare \
+multi-product policy document. This document covers MULTIPLE distinct products (each with its \
+own brand name) that may have DIFFERENT covered indications.
+
+Document metadata:
+- Payer: UnitedHealthcare
+- Policy Number: {policyNumber}
+- Document Title: {documentTitle}
+- Effective Date: {effectiveDate}
+- Structure Note: {payerStructureNote}
+
+CRITICAL — MULTI-PRODUCT ISOLATION:
+Extract ONLY indications explicitly listed under each specific product's section header. \
+Do NOT assume that an indication covered for one product is also covered for another product. \
+If Botox lists "chronic migraine" but Dysport does NOT list it, then Dysport does NOT cover it.
+
+DOCUMENT STRUCTURE:
+1. "General Requirements" section — criteria that apply to ALL products and ALL indications.
+   Extract these as universalCriteria on every record.
+2. Per-product sections:
+   Header pattern: "[Product]® ([generic]) is proven in the treatment of the following conditions:"
+   Each product section lists its OWN indications.
+3. "Unproven" section — conditions NOT covered (coveredStatus: "unproven").
+4. Excluded products (e.g., Daxxify) — explicitly excluded from coverage (coveredStatus: "excluded").
+
+STEP 1 — Extract universalCriteria from the "General Requirements" section. \
+These apply to every record in the output.
+
+STEP 2 — For each product section, identify the product name and extract its specific indications.
+
+STEP 3 — For each product + indication:
+  - Initial authorization criteria
+  - Continuation criteria
+  - Authorization duration
+  - Step therapy (e.g., Myobloc may require prior trial of another toxin)
+
+STEP 4 — Extract "Unproven" conditions (coveredStatus: "unproven", empty criteria arrays).
+
+STEP 5 — Identify excluded products (coveredStatus: "excluded", empty criteria arrays).
+
+STEP 6 — Frequency cap (e.g., "no more frequently than every 12 weeks") → add to \
+universalCriteria AND to dosingLimits.maxFrequency.
+
+Pre-extracted ICD-10 mapping:
+{icd10Json}
+
+OUTPUT FORMAT — Return a valid JSON array. One element per product + indication combination:
+{{
+  "drugName": string,
+  "brandNames": [string],
+  "productName": string,
+  "indicationName": string,
+  "indicationICD10": [string] | null,
+  "payerName": "UnitedHealthcare",
+  "effectiveDate": string,
+  "policyNumber": string,
+  "universalCriteria": [
+    {{
+      "criterionText": string,
+      "criterionType": "diagnosis" | "step_therapy" | "lab_value" | "prescriber_requirement" | "dosing" | "age" | "severity",
+      "logicOperator": "AND" | "OR",
+      "rawExcerpt": string
+    }}
+  ],
+  "preferredProducts": [],
+  "initialAuthDurationMonths": number | null,
+  "initialAuthCriteria": [
+    {{
+      "criterionText": string,
+      "criterionType": "diagnosis" | "step_therapy" | "lab_value" | "prescriber_requirement" | \
+                       "dosing" | "combination_restriction" | "age" | "severity",
+      "logicOperator": "AND" | "OR",
+      "requiredDrugsTriedFirst": [string],
+      "stepTherapyMinCount": number,
+      "trialDurationWeeks": number | null,
+      "prescriberType": string | null,
+      "requiresDocumentation": string | null,
+      "rawExcerpt": string
+    }}
+  ],
+  "reauthorizationCriteria": [
+    {{
+      "criterionText": string,
+      "criterionType": string,
+      "logicOperator": "AND" | "OR",
+      "maxAuthDurationMonths": number | null,
+      "requiresDocumentation": string | null,
+      "rawExcerpt": string
+    }}
+  ],
+  "dosingLimits": {{
+    "maxDoseMg": number | null,
+    "maxFrequency": string | null,
+    "weightBased": boolean,
+    "maxDoseMgPerKg": number | null,
+    "perFDALabel": boolean
+  }} | null,
+  "combinationRestrictions": [],
+  "quantityLimits": null,
+  "benefitType": "medical",
+  "selfAdminAllowed": null,
+  "coveredStatus": "covered" | "unproven" | "excluded",
+  "confidence": number
+}}
+
+CRITICAL RULES:
+- universalCriteria must appear on EVERY record — do not omit it.
+- Each product section is INDEPENDENT. Never cross-assign indications between products.
+- Daxxify (daxibotulinumtoxinA-lanm): if mentioned as excluded, set coveredStatus: "excluded".
+- Unproven conditions: coveredStatus: "unproven", empty initialAuthCriteria.
+- Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
+
+Document text:
+{documentText}"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prompt C-3Phase — Cigna IP#### Three-Phase Approval (e.g., Rituximab)
+# ─────────────────────────────────────────────────────────────────────────────
+PROMPT_C_CIGNA_3PHASE = """\
+You are extracting structured medical benefit drug policy criteria from a Cigna Drug \
+Coverage Policy (IP####) that uses a THREE-PHASE approval structure per indication.
+
+Document metadata:
+- Payer: Cigna
+- Coverage Policy Number: {policyNumber}
+- Document Title: {documentTitle}
+- Effective Date: {effectiveDate}
+- Structure Note: {payerStructureNote}
+
+CRITICAL — THREE SEPARATE PHASES:
+Each numbered indication has THREE separate approval paths. Extract EACH as a separate record \
+with its own approvalPhase label. NEVER merge criteria from different phases into one record.
+
+PHASE STRUCTURE per indication:
+  A) Initial Therapy:
+     "Approve for [N] months if the patient meets ALL of the following..."
+     → approvalPhase: "initial", approvalDurationMonths: N
+  B) Patient has received one prior course of therapy:
+     "Approve for [N] months if ALL of the following..."
+     → approvalPhase: "continuation_1", approvalDurationMonths: N
+  C) Patient has received two or more prior courses:
+     "Approve for [N] months if ALL of the following..."
+     → approvalPhase: "continuation_2plus", approvalDurationMonths: N
+
+STEP 1 — IGNORE "INSTRUCTIONS FOR USE" boilerplate at document start.
+
+STEP 2 — Parse each numbered indication: "1. Rheumatoid Arthritis (RA)"
+
+STEP 3 — Within each indication, find Phase A, B, and C sub-sections.
+
+STEP 4 — Extract criteria for each phase separately. \
+"Approve for [N] months if..." → capture N as approvalDurationMonths for that phase.
+
+STEP 5 — NOTE BLOCKS: Lines beginning with "Note:" are clarifications, NOT criteria. \
+Do NOT create a CriteriaItem for "Note:" lines. You may incorporate their content into \
+the criterionText of the immediately preceding criterion if directly relevant.
+
+STEP 6 — DOSING: Each indication may have a dosing sub-section. \
+Extract as dosingPerIndication entries.
+
+STEP 7 — "Conditions Not Covered" section at end: extract as records with \
+coveredStatus: "excluded".
+
+Pre-extracted ICD-10 mapping:
+{icd10Json}
+
+OUTPUT FORMAT — Return a valid JSON array. \
+One element per indication + phase (3 records per indication):
+{{
+  "drugName": string,
+  "brandNames": [string],
+  "indicationName": string,
+  "approvalPhase": "initial" | "continuation_1" | "continuation_2plus",
+  "approvalDurationMonths": number | null,
+  "indicationICD10": [string] | null,
+  "payerName": "Cigna",
+  "effectiveDate": string,
+  "policyNumber": string,
+  "preferredProducts": [],
+  "initialAuthDurationMonths": number | null,
+  "initialAuthCriteria": [
+    {{
+      "criterionText": string,
+      "criterionType": "diagnosis" | "step_therapy" | "lab_value" | "prescriber_requirement" | "dosing" | "age" | "severity",
+      "logicOperator": "AND" | "OR",
+      "requiredDrugsTriedFirst": [string],
+      "stepTherapyMinCount": number,
+      "trialDurationWeeks": number | null,
+      "prescriberType": string | null,
+      "requiresDocumentation": string | null,
+      "rawExcerpt": string
+    }}
+  ],
+  "reauthorizationCriteria": [],
+  "dosingPerIndication": [
+    {{
+      "indicationContext": string,
+      "regimen": string,
+      "maxDoseMg": number | null
+    }}
+  ],
+  "dosingLimits": null,
+  "combinationRestrictions": [],
+  "benefitType": "medical",
+  "coveredStatus": "covered" | "excluded",
+  "confidence": number
+}}
+
+CRITICAL RULES:
+- Phase A → approvalPhase: "initial", put all criteria in initialAuthCriteria.
+- Phase B → approvalPhase: "continuation_1", put criteria in initialAuthCriteria (for this phase's record).
+- Phase C → approvalPhase: "continuation_2plus", put criteria in initialAuthCriteria (for this phase's record).
+- approvalDurationMonths: extract the N from "Approve for N months if..." for THIS specific phase.
+- Do NOT extract "Note:" lines as CriteriaItem entries.
+- "Preferred product criteria is met" → extract as step_therapy criterion referencing preferred products.
+- Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
+
+Document text:
+{documentText}"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prompt G — EmblemHealth / Prime Therapeutics
+# ─────────────────────────────────────────────────────────────────────────────
+PROMPT_G_EMBLEMHEALTH = """\
+You are extracting structured medical benefit drug policy criteria from an EmblemHealth / \
+Prime Therapeutics policy document. This document uses universal criteria plus \
+indication-specific criteria, organized by product group.
+
+Document metadata:
+- Payer: EmblemHealth
+- Policy Number: {policyNumber}
+- Document Title: {documentTitle}
+- Effective Date: {effectiveDate}
+- Structure Note: {payerStructureNote}
+
+DOCUMENT STRUCTURE:
+1. Universal Criteria — apply to ALL products and ALL indications in this policy \
+   (e.g., calcium ≥1000 mg/day, vitamin D ≥400 IU/day, no hypocalcemia, \
+   no concurrent bisphosphonate). Extract as universalCriteria on every record.
+2. Product-group split:
+   - Prolia-type: products indicated for osteoporosis (Prolia, Bildyos, Jubbonti)
+   - Xgeva-type: products indicated for oncology (Xgeva, Bilprevda, Wyost)
+3. Within each product group: indication-specific initial criteria.
+4. Preferred products within each group:
+   - Prolia-type: Bildyos / Jubbonti preferred over Prolia
+   - Xgeva-type: Bilprevda / Wyost preferred over Xgeva
+5. Renewal / Reauthorization Criteria section — extract as reauthorizationCriteria. \
+   These are simpler than initial criteria (typically response documentation only).
+6. "Length of Authorization" table — extract initialAuthDurationMonths and maxAuthDurationMonths.
+
+FOOTNOTE SYMBOLS (pre-resolved):
+Footnote symbols (†, ‡, ¤) have already been replaced inline with \
+"[DEFINED AS: full definition text]". \
+Treat the [DEFINED AS: ...] content as integral to the criterion definition.
+
+STEP THERAPY WITHIN PRODUCT GROUPS:
+The Prolia-type group requires a prior trial of EITHER:
+  - 6-month oral bisphosphonate, OR
+  - 12-month IV zoledronic acid
+Extract as: criterionType: "step_therapy", logicOperator: "OR", \
+requiredDrugsTriedFirst: ["oral bisphosphonate (6-month)", "IV zoledronic acid (12-month)"], \
+stepTherapyMinCount: 1.
+
+Pre-extracted ICD-10 mapping:
+{icd10Json}
+
+OUTPUT FORMAT — Return a valid JSON array. One element per product group + indication:
+{{
+  "drugName": string,
+  "brandNames": [string],
+  "productGroup": "prolia_type" | "xgeva_type",
+  "indicationName": string,
+  "indicationICD10": [string] | null,
+  "payerName": "EmblemHealth",
+  "effectiveDate": string,
+  "policyNumber": string,
+  "universalCriteria": [
+    {{
+      "criterionText": string,
+      "criterionType": "diagnosis" | "lab_value" | "dosing" | "combination_restriction" | "age",
+      "logicOperator": "AND",
+      "rawExcerpt": string
+    }}
+  ],
+  "preferredProducts": [
+    {{ "productName": string, "rank": number, "preferredStatus": "preferred" | "non_preferred" }}
+  ],
+  "initialAuthDurationMonths": number | null,
+  "maxAuthDurationMonths": number | null,
+  "initialAuthCriteria": [
+    {{
+      "criterionText": string,
+      "criterionType": "diagnosis" | "step_therapy" | "lab_value" | "prescriber_requirement" | \
+                       "dosing" | "age" | "severity",
+      "logicOperator": "AND" | "OR",
+      "requiredDrugsTriedFirst": [string],
+      "stepTherapyMinCount": number,
+      "trialDurationWeeks": number | null,
+      "prescriberType": string | null,
+      "requiresDocumentation": string | null,
+      "rawExcerpt": string
+    }}
+  ],
+  "reauthorizationCriteria": [
+    {{
+      "criterionText": string,
+      "criterionType": string,
+      "logicOperator": "AND" | "OR",
+      "maxAuthDurationMonths": number | null,
+      "requiresDocumentation": string | null,
+      "rawExcerpt": string
+    }}
+  ],
+  "dosingLimits": {{
+    "maxDoseMg": number | null,
+    "maxFrequency": string | null,
+    "weightBased": boolean,
+    "perFDALabel": boolean
+  }} | null,
+  "combinationRestrictions": [],
+  "benefitType": "medical",
+  "coveredStatus": "covered",
+  "confidence": number
+}}
+
+CRITICAL RULES:
+- universalCriteria must appear on EVERY record — do not omit.
+- [DEFINED AS: ...] inline text is part of the criterion — include it in criterionText.
+- Prolia-type step therapy: OR between oral bisphosphonate (6-month) and IV zoledronic acid (12-month).
+- Preferred biosimilar hierarchy: Bildyos/Jubbonti preferred over Prolia; \
+  Bilprevda/Wyost preferred over Xgeva.
+- Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
+
+Document text:
+{documentText}"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prompt H — Florida Blue / MCG Table-Format Policy
+# ─────────────────────────────────────────────────────────────────────────────
+PROMPT_H_FLORIDA_BLUE = """\
+You are extracting structured medical benefit drug policy criteria from a Florida Blue / MCG \
+policy document that uses a TABLE FORMAT for coverage criteria.
+
+Document metadata:
+- Payer: Florida Blue
+- Policy Number: {policyNumber}
+- Document Title: {documentTitle}
+- Effective Date: {effectiveDate}
+- Structure Note: {payerStructureNote}
+
+DOCUMENT STRUCTURE:
+- Table 1: Two-column table — Indication | Criteria. Each row = one clinical indication.
+- Section I (Position Statement): initiation criteria applying to ALL indications → universalCriteria.
+- Section II: continuation / reauthorization criteria → reauthorizationCriteria.
+- Preferred products: Mvasi and Zirabev are preferred; Avastin (reference) is non-preferred.
+
+TABLE 1 PARSING — for each row:
+- Column 1 = indicationName
+- Column 2 = criteria text with nested AND/OR logic
+
+NESTED LOGIC MARKERS (exact text signals — preserve the logic hierarchy):
+- "BOTH of the following:" → AND (numbered sub-items 1, 2)
+- "ALL of the following:" → AND (numbered or bulleted sub-items)
+- "ONE of the following:" → OR (lettered sub-items a, b, c)
+- "ANY of the following:" → OR (lettered sub-items)
+Logic can nest up to 3 levels inside a single table cell.
+
+SECTION I — UNIVERSAL CRITERIA:
+Extract as universalCriteria. Typical items:
+- Indication is listed in Table 1 AND criteria are met
+- Dose at or below the threshold (e.g., ≤ 10 mg/kg Q2W or ≤ 15 mg/kg Q3W)
+- Biosimilar step therapy (non-preferred products require Mvasi or Zirabev trial first)
+
+SECTION II — CONTINUATION CRITERIA:
+Extract as reauthorizationCriteria. Apply to all indications.
+
+Pre-extracted ICD-10 mapping:
+{icd10Json}
+
+OUTPUT FORMAT — Return a valid JSON array. One element per Table 1 indication row:
+{{
+  "drugName": string,
+  "brandNames": [string],
+  "indicationName": string,
+  "indicationICD10": [string] | null,
+  "payerName": "Florida Blue",
+  "effectiveDate": string,
+  "policyNumber": string,
+  "universalCriteria": [
+    {{
+      "criterionText": string,
+      "criterionType": "diagnosis" | "step_therapy" | "dosing" | "prescriber_requirement",
+      "logicOperator": "AND" | "OR",
+      "requiredDrugsTriedFirst": [string],
+      "rawExcerpt": string
+    }}
+  ],
+  "preferredProducts": [
+    {{ "productName": string, "rank": number }}
+  ],
+  "initialAuthDurationMonths": number | null,
+  "initialAuthCriteria": [
+    {{
+      "criterionText": string,
+      "criterionType": "diagnosis" | "step_therapy" | "lab_value" | "prescriber_requirement" | \
+                       "dosing" | "age" | "severity",
+      "logicOperator": "AND" | "OR",
+      "requiredDrugsTriedFirst": [string],
+      "stepTherapyMinCount": number,
+      "trialDurationWeeks": number | null,
+      "prescriberType": string | null,
+      "requiresDocumentation": string | null,
+      "rawExcerpt": string
+    }}
+  ],
+  "reauthorizationCriteria": [
+    {{
+      "criterionText": string,
+      "criterionType": string,
+      "logicOperator": "AND" | "OR",
+      "maxAuthDurationMonths": number | null,
+      "requiresDocumentation": string | null,
+      "rawExcerpt": string
+    }}
+  ],
+  "dosingLimits": {{
+    "maxDoseMg": number | null,
+    "maxFrequency": string | null,
+    "weightBased": boolean,
+    "maxDoseMgPerKg": number | null,
+    "perFDALabel": boolean
+  }} | null,
+  "combinationRestrictions": [],
+  "benefitType": "medical",
+  "coveredStatus": "covered",
+  "confidence": number
+}}
+
+CRITICAL RULES:
+- universalCriteria (from Section I) must appear on EVERY record.
+- BOTH/ALL → AND logic. ONE/ANY → OR logic. Map to logicOperator.
+- Mvasi and Zirabev are preferred; Avastin is non-preferred.
+- Do NOT extract "Description" section boilerplate or MCG disclaimers as clinical criteria.
+- Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
+
+Document text:
+{documentText}"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prompt B-Formulary — Formulary / Medical Drug List Table Extraction
+# ─────────────────────────────────────────────────────────────────────────────
+PROMPT_B_FORMULARY_TABLE = """\
+You are extracting formulary entries from a health plan Medical Drug List table. \
+This is NOT a clinical criteria document — it is a structured list of covered drugs \
+with their coverage levels and restrictions.
+
+Document metadata:
+- Payer: {payerName}
+- Document Title: {documentTitle}
+- Effective Date: {effectiveDate}
+- Therapeutic Category Context: {therapeuticCategory}
+
+INPUT FORMAT — Table rows: HCPCS/CPT | Drug Name | Description | Coverage Level | Notes
+
+NOTES COLUMN CODE MEANINGS:
+- PA = Prior Authorization required
+- SOS = Site of Service restriction
+- CC = Clinical Criteria apply
+- SP = Specialty Pharmacy required
+- CA:[HCPCS]([drug]) = Covered Alternative (preferred product) — parse as coveredAlternatives
+- ICD-10:[codes] = ICD-10 bypass codes — parse comma-separated codes into paBypassIcd10Codes
+
+COVERAGE LEVEL MAPPING:
+- "Preferred Specialty" or "Preferred" → "preferred_specialty"
+- "Non-Specialty" or "Standard" or "Covered" → "non_specialty"
+- "Non-Preferred" → "non_preferred"
+- "Not Covered" or "Excluded" or "N/C" → "not_covered"
+
+EXTRACTION TASK — For each drug row (skip headers, skip rows with empty HCPCS column):
+{{
+  "hcpcsCode": string,
+  "drugName": string,
+  "genericName": string | null,
+  "therapeuticCategory": string,
+  "coverageLevel": "preferred_specialty" | "non_specialty" | "non_preferred" | "not_covered",
+  "priorAuthRequired": boolean,
+  "siteOfServiceRestriction": boolean,
+  "specialtyPharmacyRequired": boolean,
+  "clinicalCriteriaApply": boolean,
+  "coveredAlternatives": [{{ "hcpcsCode": string, "drugName": string }}],
+  "paBypassIcd10Codes": [string],
+  "rawNotesText": string,
+  "documentClass": "formulary"
+}}
+
+CRITICAL RULES:
+- Skip rows where the HCPCS/CPT column is empty — those are category headers.
+- Skip the header row (column labels).
+- Use the therapeuticCategory from the metadata above for all rows in this batch.
+- Parse CA:[HCPCS]([drug]) into coveredAlternatives entries.
+- Parse ICD-10:[codes] — split on commas, trim spaces → paBypassIcd10Codes array.
+- If drug name contains both brand and generic (e.g., "RITUXIMAB (Rituxan)"), \
+  set drugName to brand name and genericName to generic.
+- Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
+
+Table rows:
+{documentText}"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prompt F-Preferred — BCBS NC Preferred Injectable / Preferred Product Programs
+# ─────────────────────────────────────────────────────────────────────────────
+PROMPT_F_PREFERRED_PRODUCT = """\
+You are extracting preferred product program data from a Blue Cross Blue Shield \
+Preferred Injectable Oncology policy or similar preferred product program document.
+
+CRITICAL: FDA Approved Use / FDA-Approved Indications sections are REFERENCE LISTS only. \
+Do NOT extract their contents as clinical coverage criteria.
+
+Document metadata:
+- Payer: {payerName}
+- Policy Number: {policyNumber}
+- Document Title: {documentTitle}
+- Effective Date: {effectiveDate}
+- Structure Note: {payerStructureNote}
+
+DOCUMENT STRUCTURE:
+- Drug class sections (e.g., bevacizumab agents, rituximab agents, trastuzumab agents)
+- Within each drug class: preferred products table and non-preferred products table
+- Step therapy is PRODUCT-TIER-BASED: non-preferred product requires trial/failure of preferred product
+- Documentation requirements for non-preferred exception access
+
+EXTRACTION TASK — For each drug class, extract ONE preferred product program record:
+{{
+  "drugClass": string,
+  "drugName": string,
+  "brandNames": [string],
+  "payerName": string,
+  "effectiveDate": string,
+  "policyNumber": string,
+  "preferredProducts": [
+    {{
+      "productName": string,
+      "genericSuffix": string | null,
+      "rank": 1,
+      "preferredStatus": "preferred",
+      "hcpcsCode": string | null
+    }}
+  ],
+  "nonPreferredProducts": [
+    {{
+      "productName": string,
+      "preferredStatus": "non_preferred",
+      "hcpcsCode": string | null,
+      "exceptionCriteria": [
+        {{
+          "criterionText": string,
+          "criterionType": "step_therapy" | "prescriber_attestation" | "diagnosis" | "other",
+          "requiredTrialProduct": string | null,
+          "trialDurationWeeks": number | null,
+          "trialOutcomeRequired": string | null,
+          "documentationRequired": string | null,
+          "logicOperator": "AND" | "OR",
+          "rawExcerpt": string
+        }}
+      ]
+    }}
+  ],
+  "documentationRequirements": [string],
+  "stepTherapySummary": string,
+  "documentClass": "preferred_specialty_mgmt"
+}}
+
+CRITICAL RULES:
+- FDA Approved Use sections = reference only. Do NOT extract as criteria.
+- Step therapy is product-tier: preferred must be tried before non-preferred.
+- documentationRequirements = prescriber attestations, medical records, or clinical notes required \
+  when requesting non-preferred product exception.
+- Return a JSON array (one element per drug class). No explanation, no markdown.
+
+Document text:
+{documentText}"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Legacy generic fallback prompt — kept for unknown payers
 # ─────────────────────────────────────────────────────────────────────────────
 EXTRACTION_PROMPT = """\
@@ -793,11 +1385,32 @@ PROMPT_MAP = {
         "UHC": PROMPT_A_UHC,
         "Aetna": PROMPT_B_AETNA,
         "Cigna": PROMPT_C_CIGNA,
+        "EmblemHealth": PROMPT_G_EMBLEMHEALTH,
+        "Prime Therapeutics": PROMPT_G_EMBLEMHEALTH,
+        "Florida Blue": PROMPT_H_FLORIDA_BLUE,
+        "MCG": PROMPT_H_FLORIDA_BLUE,
     },
     "max_dosage": PROMPT_D_DOSING,
     "update_bulletin": PROMPT_E_CHANGES,
     "preferred_specialty_mgmt": PROMPT_F_PSM,
+    "preferred_injectable": PROMPT_F_PREFERRED_PRODUCT,
+}
+
+# Explicit prompt ID → template lookup (used by bedrock_extract._get_prompt_template)
+PROMPT_ID_MAP: dict = {
+    "A": PROMPT_A_UHC,
+    "A_MULTIPRODUCT": PROMPT_A_UHC_MULTIPRODUCT,
+    "B": PROMPT_B_AETNA,
+    "B_FORMULARY": PROMPT_B_FORMULARY_TABLE,
+    "C": PROMPT_C_CIGNA,
+    "C_3PHASE": PROMPT_C_CIGNA_3PHASE,
+    "D": PROMPT_D_DOSING,
+    "E": PROMPT_E_CHANGES,
+    "F": PROMPT_F_PSM,
+    "F_PREFERRED": PROMPT_F_PREFERRED_PRODUCT,
+    "G": PROMPT_G_EMBLEMHEALTH,
+    "H": PROMPT_H_FLORIDA_BLUE,
 }
 
 # Document classes that should NOT be extracted (index-only)
-NO_EXTRACTION_CLASSES = {"formulary", "self_admin", "pa_framework", "site_of_care"}
+NO_EXTRACTION_CLASSES = {"self_admin", "pa_framework", "site_of_care"}
