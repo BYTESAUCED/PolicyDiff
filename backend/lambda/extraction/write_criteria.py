@@ -4,6 +4,13 @@
 # Batch-writes all scored DrugPolicyCriteria records to DynamoDB
 # and updates the PolicyDocuments record with extraction status.
 #
+# Extended for hackathon documents:
+#   - FormularyEntry records (Priority Health B_FORMULARY) routed to
+#     FORMULARY_ENTRIES_TABLE when set, else DrugPolicyCriteria table
+#   - New schema fields written as-is (DynamoDB is schemaless):
+#     universalCriteria, approvalPhase, approvalDurationMonths,
+#     productName, productGroup, dosingPerIndication
+#
 # Step Functions I/O:
 #   Input:  { policyDocId, extractedCriteria: [...], confidenceSummary, ... }
 #   Output: { ..., writeStatus: "complete", recordsWritten }
@@ -22,6 +29,8 @@ logger.setLevel(logging.INFO)
 
 POLICY_DOCUMENTS_TABLE = os.environ.get("POLICY_DOCUMENTS_TABLE", "PolicyDocuments")
 DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "DrugPolicyCriteria")
+# Falls back to DrugPolicyCriteria if a dedicated formulary table is not provisioned
+FORMULARY_ENTRIES_TABLE = os.environ.get("FORMULARY_ENTRIES_TABLE", DRUG_POLICY_CRITERIA_TABLE)
 
 dynamodb = boto3.resource("dynamodb")
 
@@ -45,25 +54,55 @@ def _batch_write_criteria(criteria: list[dict]) -> int:
 
     with table.batch_writer() as batch:
         for record in criteria:
-            # Ensure required keys exist
             if not record.get("policyDocId") or not record.get("drugIndicationId"):
-                logger.warning(json.dumps({"warning": "skipping_record_missing_keys", "drugName": record.get("drugName", "unknown")}))
+                logger.warning(f"Skipping record missing required keys: {record.get('drugName', '?')}")
                 continue
 
-            # Add extraction timestamp
             record["extractedAt"] = now
-
-            # Convert floats to Decimal (DynamoDB requirement)
             item = _convert_floats(record)
-
-            # Remove any None values (DynamoDB doesn't support them)
             item = {k: v for k, v in item.items() if v is not None}
 
             try:
                 batch.put_item(Item=item)
                 written += 1
             except Exception as e:
-                logger.error(json.dumps({"error": "record_write_failed", "drugIndicationId": record.get("drugIndicationId"), "detail": str(e)}))
+                logger.error(f"Failed to write record {record.get('drugIndicationId')}: {e}")
+
+    return written
+
+
+def _batch_write_formulary_entries(entries: list[dict]) -> int:
+    """Batch write FormularyEntry records.
+
+    PK: policyDocId, SK: drugIndicationId = {hcpcsCode}#{drugName}
+    Uses FORMULARY_ENTRIES_TABLE (defaults to DrugPolicyCriteria if not configured).
+    """
+    table = dynamodb.Table(FORMULARY_ENTRIES_TABLE)
+    now = datetime.now(timezone.utc).isoformat()
+    written = 0
+
+    with table.batch_writer() as batch:
+        for entry in entries:
+            policy_doc_id = entry.get("policyDocId", "")
+            hcpcs = entry.get("hcpcsCode", "unknown")
+            drug = entry.get("drugName", "unknown")
+
+            if not policy_doc_id:
+                logger.warning("Skipping formulary entry: missing policyDocId")
+                continue
+
+            # Use drugIndicationId slot as SK for table compatibility
+            entry.setdefault("drugIndicationId", f"{hcpcs}#{drug}")
+            entry["extractedAt"] = now
+
+            item = _convert_floats(entry)
+            item = {k: v for k, v in item.items() if v is not None}
+
+            try:
+                batch.put_item(Item=item)
+                written += 1
+            except Exception as e:
+                logger.error(f"Failed to write formulary entry {hcpcs}#{drug}: {e}")
 
     return written
 
@@ -77,14 +116,12 @@ def _update_policy_status(
 ) -> None:
     """Update the PolicyDocuments table with extraction results.
 
-    ADR: Race condition guard | EventBridge fires before POST /api/policies creates the
-    PolicyDocuments record. Use update_item with attribute_not_exists guard to create a
-    minimal stub record if it doesn't exist yet, preserving any existing metadata.
+    Race condition guard: creates a stub record if the PolicyDocuments entry
+    doesn't exist yet (EventBridge fires before POST /api/policies).
     """
     table = dynamodb.Table(POLICY_DOCUMENTS_TABLE)
     now = datetime.now(timezone.utc).isoformat()
 
-    # First try to create a stub record if it doesn't exist (handles race condition)
     if event:
         try:
             table.put_item(
@@ -101,38 +138,35 @@ def _update_policy_status(
                 },
                 ConditionExpression="attribute_not_exists(policyDocId)",
             )
-            logger.info(json.dumps({"action": "stub_record_created", "policyDocId": policy_doc_id}))
+            logger.info(f"Created stub PolicyDocuments record for {policy_doc_id}")
         except Exception:
-            pass  # Record already exists — that's fine, proceed to update
-
-    update_expr = (
-        "SET extractionStatus = :s, "
-        "indicationsFound = :n, "
-        "extractionProgress = :p, "
-        "confidenceSummary = :cs, "
-        "updatedAt = :u"
-    )
-    expr_values = {
-        ":s": status,
-        ":n": indications_found,
-        ":p": f"Extracted {indications_found} drug-indication pairs",
-        ":cs": _convert_floats(confidence_summary),
-        ":u": now,
-    }
+            pass  # Record already exists — expected
 
     try:
         table.update_item(
             Key={"policyDocId": policy_doc_id},
-            UpdateExpression=update_expr,
-            ExpressionAttributeValues=expr_values,
+            UpdateExpression=(
+                "SET extractionStatus = :s, "
+                "indicationsFound = :n, "
+                "extractionProgress = :p, "
+                "confidenceSummary = :cs, "
+                "updatedAt = :u"
+            ),
+            ExpressionAttributeValues={
+                ":s": status,
+                ":n": indications_found,
+                ":p": f"Extracted {indications_found} drug-indication pairs",
+                ":cs": _convert_floats(confidence_summary),
+                ":u": now,
+            },
         )
-        logger.info(json.dumps({"action": "policy_status_updated", "policyDocId": policy_doc_id, "status": status}))
+        logger.info(f"Updated policy {policy_doc_id} status to '{status}'")
     except Exception as e:
-        logger.error(json.dumps({"error": "policy_status_update_failed", "detail": str(e)}))
+        logger.error(f"Failed to update policy status: {e}")
         raise
 
 
-def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     """Batch write extracted criteria to DynamoDB and update policy status."""
     logger.info(json.dumps({"state": "WriteToDynamoDB", "policyDocId": event.get("policyDocId")}))
 
@@ -141,26 +175,28 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     confidence_summary: dict = event.get("confidenceSummary", {})
 
     if not criteria:
-        logger.warning(json.dumps({"warning": "no_criteria_to_write", "policyDocId": policy_doc_id}))
+        logger.warning(f"No criteria to write for policy {policy_doc_id}")
         _update_policy_status(policy_doc_id, "complete", 0, confidence_summary, event)
-        return {
-            **event,
-            "writeStatus": "complete",
-            "recordsWritten": 0,
-        }
+        return {**event, "writeStatus": "complete", "recordsWritten": 0}
 
-    # 1. Batch write criteria records
-    records_written = _batch_write_criteria(criteria)
-    logger.info(json.dumps({"action": "criteria_written", "written": records_written, "total": len(criteria)}))
+    # Route formulary entries separately from clinical criteria
+    formulary_entries = [r for r in criteria if r.get("documentClass") == "formulary"]
+    clinical_criteria = [r for r in criteria if r.get("documentClass") != "formulary"]
 
-    # 2. Update policy document status
+    records_written = 0
+
+    if clinical_criteria:
+        written = _batch_write_criteria(clinical_criteria)
+        records_written += written
+        logger.info(f"Wrote {written}/{len(clinical_criteria)} clinical criteria records")
+
+    if formulary_entries:
+        written = _batch_write_formulary_entries(formulary_entries)
+        records_written += written
+        logger.info(f"Wrote {written}/{len(formulary_entries)} formulary entries to {FORMULARY_ENTRIES_TABLE}")
+
     review_count = confidence_summary.get("reviewCount", 0)
     status = "review_required" if review_count > 0 else "complete"
-
     _update_policy_status(policy_doc_id, status, records_written, confidence_summary, event)
 
-    return {
-        **event,
-        "writeStatus": "complete",
-        "recordsWritten": records_written,
-    }
+    return {**event, "writeStatus": "complete", "recordsWritten": records_written}

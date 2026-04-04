@@ -2,14 +2,22 @@
 # State 3.0 — ClassifyDocument
 #
 # Classifies uploaded documents by type BEFORE Textract / extraction.
-# Routes each document to the correct prompt (A–F) or marks it as
+# Routes each document to the correct prompt (A–H + variants) or marks it as
 # index-only (no extraction needed).
 #
-# All documents are assumed to be PDF and processed via Textract.
+# New payers added for hackathon documents:
+#   EmblemHealth / Prime Therapeutics → Prompt G
+#   Florida Blue / MCG               → Prompt H
+#   Priority Health Medical Drug List → Prompt B_FORMULARY
+#   BCBS NC Preferred Injectable      → Prompt F_PREFERRED
+#   UHC multi-product (Botulinum)     → Prompt A_MULTIPRODUCT
+#   Cigna 3-phase (Rituximab)         → Prompt C_3PHASE
 #
 # Step Functions I/O:
-#   Input:  { policyDocId, s3Bucket, s3Key, payerName, documentTitle, ... }
-#   Output: { ..., documentClass, documentFormat, extractionPromptId, skipExtraction }
+#   Input:  { policyDocId, s3Bucket, s3Key, payerName, documentTitle,
+#             policyNumber, ... }
+#   Output: { ..., documentClass, documentFormat, extractionPromptId,
+#             skipExtraction, payerStructureNote }
 
 import json
 import logging
@@ -25,35 +33,75 @@ POLICY_DOCUMENTS_TABLE = os.environ.get("POLICY_DOCUMENTS_TABLE", "PolicyDocumen
 dynamodb = boto3.resource("dynamodb")
 
 
-def _enrich_event_from_dynamo(event: dict) -> dict:
-    """Fetch real metadata from PolicyDocuments if payerName is missing."""
-    if event.get("payerName"):
-        return event  # Already have metadata
+# ── Payer structure notes injected into Bedrock prompts ──────────────────────
 
-    policy_doc_id = event.get("policyDocId")
-    if not policy_doc_id:
-        return event
+_PAYER_STRUCTURE_NOTES: dict[str, str] = {
+    "A_MULTIPRODUCT": (
+        "Multi-product policy covering 5 botulinum toxin products: Botox, Dysport, Xeomin, "
+        "Myobloc, and Daxxify (excluded). General Requirements apply to ALL products. "
+        "Each product section lists its OWN distinct indications — do not cross-assign. "
+        "Daxxify is explicitly EXCLUDED from coverage (coveredStatus: excluded). "
+        "Universal frequency cap: no more frequently than every 12 weeks."
+    ),
+    "C_3PHASE": (
+        "Three-phase approval per indication: "
+        "A=Initial Therapy, B=One prior course of therapy, C=Two or more prior courses. "
+        "Each phase has its own approval duration embedded in text ('Approve for N months if...'). "
+        "'Note:' blocks are contextual clarifications — NOT criteria. "
+        "Extract each phase as a separate JSON record with approvalPhase label."
+    ),
+    "G": (
+        "Universal Criteria (calcium, vitamin D, no hypocalcemia, no bisphosphonate combo) "
+        "apply to ALL indications — include in every record as universalCriteria. "
+        "Product-group split: Prolia-type (osteoporosis) vs Xgeva-type (oncology). "
+        "Preferred biosimilars: Bildyos/Jubbonti over Prolia; Bilprevda/Wyost over Xgeva. "
+        "Footnote symbols (†, ‡, ¤) have been pre-resolved inline as [DEFINED AS: ...]. "
+        "Separate Renewal Criteria section exists — extract as reauthorizationCriteria."
+    ),
+    "H": (
+        "Criteria are in Table 1 format: Indication | Criteria columns. "
+        "Each table row = one oncology indication. "
+        "Section I (Position Statement) = universal initiation criteria for ALL indications. "
+        "Section II = continuation/reauthorization criteria. "
+        "Mvasi and Zirabev are PREFERRED products; Avastin (reference) is NON-PREFERRED. "
+        "Nested logic: BOTH/ALL=AND, ONE/ANY=OR."
+    ),
+    "B_FORMULARY": (
+        "Formulary table document — NOT a clinical criteria policy. "
+        "Extract FormularyEntry records from table rows. "
+        "Skip rows with empty HCPCS column (category headers). "
+        "Notes column codes: PA=prior auth, SOS=site restriction, "
+        "CA:[HCPCS]([drug])=covered alternative, ICD-10:[codes]=bypass codes."
+    ),
+    "F_PREFERRED": (
+        "Preferred/non-preferred product program by drug class. "
+        "Step therapy is product-tier-based — preferred must be tried before non-preferred. "
+        "FDA Approved Use sections are reference information ONLY — not clinical criteria. "
+        "Extract documentation requirements for non-preferred exception access."
+    ),
+    "A": (
+        "UHC drug-specific policy with rigid numbered template. "
+        "Diagnosis-Specific Criteria section contains per-indication blocks. "
+        "Preferred products in Coverage Rationale. ICD-10 codes in Applicable Codes section."
+    ),
+    "C": (
+        "Cigna IP#### policy with nested AND/OR structure. "
+        "Branch A=Initial Therapy, Branch B=Continuation. "
+        "Preferred products come from companion PSM document."
+    ),
+}
 
-    table_name = os.environ.get("POLICY_DOCUMENTS_TABLE")
-    if not table_name:
-        return event
 
-    try:
-        table = dynamodb.Table(table_name)
-        result = table.get_item(
-            Key={"policyDocId": policy_doc_id},
-            ProjectionExpression="payerName, planType, documentTitle, effectiveDate, drugName",
-        )
-        item = result.get("Item")
-        if item:
-            return {**event, **{k: v for k, v in item.items() if v}}
-    except Exception as e:
-        logger.warning(json.dumps({"warning": "dynamo_enrich_failed", "detail": str(e)}))
-
-    return event
+def _get_payer_structure_note(prompt_id: str) -> str:
+    return _PAYER_STRUCTURE_NOTES.get(prompt_id, "")
 
 
-def classify_document(payer_name: str, document_title: str, s3_key: str) -> dict:
+def classify_document(
+    payer_name: str,
+    document_title: str,
+    s3_key: str,
+    policy_number: str = "",
+) -> dict:
     """Classify a policy document and determine extraction routing.
 
     Returns:
@@ -62,54 +110,211 @@ def classify_document(payer_name: str, document_title: str, s3_key: str) -> dict
             documentFormat: "pdf",
             extractionPromptId: str | None,
             skipExtraction: bool,
+            payerStructureNote: str,
         }
     """
     title_lower = document_title.lower() if document_title else ""
     key_lower = s3_key.lower() if s3_key else ""
     payer_lower = payer_name.lower() if payer_name else ""
+    policy_lower = policy_number.lower() if policy_number else ""
 
-    # All documents are PDF — processed via Textract
     document_format = "pdf"
 
-    # Classify by document title / key patterns
-    if "maximum dosage" in title_lower or "max dosage" in title_lower:
-        doc_class = "max_dosage"
-        prompt_id = "D"
-    elif "self-administered" in title_lower or "self administered" in title_lower:
-        doc_class = "self_admin"
-        prompt_id = None
-    elif "site of care" in title_lower:
-        doc_class = "site_of_care"
-        prompt_id = None
-    elif "preferred specialty management" in title_lower or "psm" in key_lower:
-        doc_class = "preferred_specialty_mgmt"
-        prompt_id = "F"
-    elif "formulary" in title_lower or "drug guide" in title_lower or "drug list" in title_lower:
-        doc_class = "formulary"
-        prompt_id = None
-    elif "policy update" in title_lower or "policy changes" in title_lower:
-        doc_class = "update_bulletin"
-        prompt_id = "E"
-    elif "formulary exception" in title_lower:
-        doc_class = "pa_framework"
-        prompt_id = None
-    else:
-        # Default: drug-specific policy — route by payer
-        doc_class = "drug_specific"
-        payer_prompt_map = {
-            "unitedhealthcare": "A", "uhc": "A", "united": "A",
-            "aetna": "B",
-            "cigna": "C",
+    # ── Formulary / Drug List (index-only for most, B_FORMULARY for Priority Health) ──
+    is_priority_health = "priority health" in payer_lower
+    is_medical_drug_list = "medical drug list" in title_lower or "drug list" in title_lower
+
+    if is_priority_health and is_medical_drug_list:
+        return {
+            "documentClass": "formulary",
+            "documentFormat": document_format,
+            "extractionPromptId": "B_FORMULARY",
+            "skipExtraction": False,
+            "payerStructureNote": _get_payer_structure_note("B_FORMULARY"),
         }
-        prompt_id = payer_prompt_map.get(payer_lower, None)  # None → use generic fallback
 
-    skip_extraction = prompt_id is None
+    if "formulary" in title_lower or "drug guide" in title_lower:
+        return {
+            "documentClass": "formulary",
+            "documentFormat": document_format,
+            "extractionPromptId": None,
+            "skipExtraction": True,
+            "payerStructureNote": "",
+        }
 
+    # ── Self-administered / site of care / PA framework (index-only) ─────────
+    if "self-administered" in title_lower or "self administered" in title_lower:
+        return {
+            "documentClass": "self_admin",
+            "documentFormat": document_format,
+            "extractionPromptId": None,
+            "skipExtraction": True,
+            "payerStructureNote": "",
+        }
+
+    if "site of care" in title_lower:
+        return {
+            "documentClass": "site_of_care",
+            "documentFormat": document_format,
+            "extractionPromptId": None,
+            "skipExtraction": True,
+            "payerStructureNote": "",
+        }
+
+    if "formulary exception" in title_lower:
+        return {
+            "documentClass": "pa_framework",
+            "documentFormat": document_format,
+            "extractionPromptId": None,
+            "skipExtraction": True,
+            "payerStructureNote": "",
+        }
+
+    # ── Preferred Injectable / Preferred Product Programs ─────────────────────
+    is_bcbs_nc = (
+        ("blue cross blue shield of north carolina" in payer_lower)
+        or ("bcbs nc" in payer_lower)
+        or ("bcbs of nc" in payer_lower)
+    )
+    if is_bcbs_nc and (
+        "preferred injectable" in title_lower
+        or "preferred oncology" in title_lower
+        or "preferred product" in title_lower
+    ):
+        return {
+            "documentClass": "preferred_injectable",
+            "documentFormat": document_format,
+            "extractionPromptId": "F_PREFERRED",
+            "skipExtraction": False,
+            "payerStructureNote": _get_payer_structure_note("F_PREFERRED"),
+        }
+
+    # ── Cigna PSM / Preferred Specialty Management ────────────────────────────
+    if "preferred specialty management" in title_lower or "psm" in key_lower:
+        return {
+            "documentClass": "preferred_specialty_mgmt",
+            "documentFormat": document_format,
+            "extractionPromptId": "F",
+            "skipExtraction": False,
+            "payerStructureNote": _get_payer_structure_note("F"),
+        }
+
+    # ── Maximum Dosage ────────────────────────────────────────────────────────
+    if "maximum dosage" in title_lower or "max dosage" in title_lower:
+        return {
+            "documentClass": "max_dosage",
+            "documentFormat": document_format,
+            "extractionPromptId": "D",
+            "skipExtraction": False,
+            "payerStructureNote": "",
+        }
+
+    # ── Change Bulletins / Update Bulletins ───────────────────────────────────
+    if "policy update" in title_lower or "policy changes" in title_lower:
+        return {
+            "documentClass": "update_bulletin",
+            "documentFormat": document_format,
+            "extractionPromptId": "E",
+            "skipExtraction": False,
+            "payerStructureNote": "",
+        }
+
+    # ── Drug-specific policies — route by payer ───────────────────────────────
+    doc_class = "drug_specific"
+
+    # EmblemHealth / Prime Therapeutics
+    if "emblemhealth" in payer_lower or "prime therapeutics" in payer_lower:
+        return {
+            "documentClass": doc_class,
+            "documentFormat": document_format,
+            "extractionPromptId": "G",
+            "skipExtraction": False,
+            "payerStructureNote": _get_payer_structure_note("G"),
+        }
+
+    # Florida Blue / MCG
+    is_florida_blue = (
+        "florida blue" in payer_lower
+        or "bcbs of florida" in payer_lower
+        or "mcg" in payer_lower
+        or ("florida" in payer_lower and "blue" in payer_lower)
+    )
+    if is_florida_blue:
+        return {
+            "documentClass": doc_class,
+            "documentFormat": document_format,
+            "extractionPromptId": "H",
+            "skipExtraction": False,
+            "payerStructureNote": _get_payer_structure_note("H"),
+        }
+
+    # UHC — detect multi-product variant (Botulinum Toxins, etc.)
+    is_uhc = any(k in payer_lower for k in ("unitedhealthcare", "uhc", "united health"))
+    if is_uhc:
+        is_multiproduct = (
+            "botulinum" in title_lower
+            or "toxin" in title_lower
+            or "botox" in title_lower
+        )
+        if is_multiproduct:
+            return {
+                "documentClass": doc_class,
+                "documentFormat": document_format,
+                "extractionPromptId": "A_MULTIPRODUCT",
+                "skipExtraction": False,
+                "payerStructureNote": _get_payer_structure_note("A_MULTIPRODUCT"),
+            }
+        return {
+            "documentClass": doc_class,
+            "documentFormat": document_format,
+            "extractionPromptId": "A",
+            "skipExtraction": False,
+            "payerStructureNote": _get_payer_structure_note("A"),
+        }
+
+    # Cigna — detect 3-phase variant (long-form IP#### with rituximab, etc.)
+    is_cigna = "cigna" in payer_lower
+    if is_cigna:
+        # 3-phase policies: rituximab, and others with IP#### that have multi-phase structure
+        # Key signals: "IP0319" pattern or specific drug keywords
+        is_3phase = (
+            "rituximab" in title_lower
+            or "ip03" in policy_lower  # rituximab policy series
+            or "ip04" in policy_lower  # other long-form policies
+        )
+        if is_3phase:
+            return {
+                "documentClass": doc_class,
+                "documentFormat": document_format,
+                "extractionPromptId": "C_3PHASE",
+                "skipExtraction": False,
+                "payerStructureNote": _get_payer_structure_note("C_3PHASE"),
+            }
+        return {
+            "documentClass": doc_class,
+            "documentFormat": document_format,
+            "extractionPromptId": "C",
+            "skipExtraction": False,
+            "payerStructureNote": _get_payer_structure_note("C"),
+        }
+
+    # Aetna
+    if "aetna" in payer_lower:
+        return {
+            "documentClass": doc_class,
+            "documentFormat": document_format,
+            "extractionPromptId": "B",
+            "skipExtraction": False,
+            "payerStructureNote": "",
+        }
+
+    # Unknown payer → generic fallback (skip extraction to avoid garbage)
     return {
         "documentClass": doc_class,
         "documentFormat": document_format,
-        "extractionPromptId": prompt_id,
-        "skipExtraction": skip_extraction,
+        "extractionPromptId": None,
+        "skipExtraction": False,
+        "payerStructureNote": "",
     }
 
 
@@ -117,13 +322,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Classify document type and determine extraction routing."""
     logger.info(json.dumps({"state": "ClassifyDocument", "policyDocId": event.get("policyDocId")}))
 
-    event = _enrich_event_from_dynamo(event)
-
     payer_name = event.get("payerName", "")
     document_title = event.get("documentTitle", "")
     s3_key = event.get("s3Key", "")
+    policy_number = event.get("policyNumber", "")
 
-    classification = classify_document(payer_name, document_title, s3_key)
+    classification = classify_document(payer_name, document_title, s3_key, policy_number)
 
     logger.info(json.dumps({
         "classification": classification,
@@ -144,11 +348,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 ":dc": classification["documentClass"],
                 ":df": classification["documentFormat"],
                 ":ep": classification["extractionPromptId"] or "none",
-                ":bs": False,  # will be set to True after State 3 strips boilerplate
+                ":bs": False,
             },
         )
     except Exception as e:
-        logger.warning(json.dumps({"warning": "classify_document_update_failed", "detail": str(e)}))
+        logger.warning(f"Failed to update policy document classification: {e}")
 
     return {
         **event,
