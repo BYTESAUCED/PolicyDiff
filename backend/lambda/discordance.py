@@ -20,15 +20,15 @@ from decimal import Decimal
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "*")
-DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "DrugPolicyCriteria")
-POLICY_DIFFS_TABLE = os.environ.get("POLICY_DIFFS_TABLE", "PolicyDiffs")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-5-20250514")
+DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "")
+POLICY_DIFFS_TABLE = os.environ.get("POLICY_DIFFS_TABLE", "")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
 
 dynamodb = boto3.resource("dynamodb")
 bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
@@ -171,9 +171,8 @@ def list_discordances() -> dict:
     diffs_table = dynamodb.Table(POLICY_DIFFS_TABLE)
 
     try:
-        result = diffs_table.query(
-            IndexName="drugName-diffType-index",
-            KeyConditionExpression=Key("diffType").eq("benefit_discordance"),
+        result = diffs_table.scan(
+            FilterExpression=Attr("diffType").eq("benefit_discordance"),
             Limit=50,
         )
         existing = result.get("Items", [])
@@ -251,7 +250,7 @@ def get_discordance_detail(drug: str, payer: str) -> dict:
         analysis = json.loads(cleaned)
     except Exception as e:
         logger.error(f"Bedrock discordance analysis failed: {e}")
-        return _response(500, {"error": "Discordance analysis failed", "detail": str(e)})
+        return _response(500, {"error": "Discordance analysis failed"})
 
     # Store result in PolicyDiffs table
     diffs_table = dynamodb.Table(POLICY_DIFFS_TABLE)
@@ -306,4 +305,4 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     except Exception as e:
         logger.exception(f"Unhandled error: {e}")
-        return _response(500, {"error": "Internal server error", "detail": str(e)})
+        return _response(500, {"error": "Internal server error"})

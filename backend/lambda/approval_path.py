@@ -34,10 +34,10 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "*")
-DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "DrugPolicyCriteria")
-POLICY_DOCUMENTS_TABLE = os.environ.get("POLICY_DOCUMENTS_TABLE", "PolicyDocuments")
-APPROVAL_PATHS_TABLE = os.environ.get("APPROVAL_PATHS_TABLE", "ApprovalPaths")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-5-20250514")
+DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "")
+POLICY_DOCUMENTS_TABLE = os.environ.get("POLICY_DOCUMENTS_TABLE", "")
+APPROVAL_PATHS_TABLE = os.environ.get("APPROVAL_PATHS_TABLE", "")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
 
 dynamodb = boto3.resource("dynamodb")
 bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
@@ -357,4 +357,4 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     except Exception as e:
         logger.exception(f"Unhandled error: {e}")
-        return _response(500, {"error": "Internal server error", "detail": str(e)})
+        return _response(500, {"error": "Internal server error"})

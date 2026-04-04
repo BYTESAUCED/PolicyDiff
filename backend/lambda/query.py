@@ -29,11 +29,11 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "*")
-QUERY_LOG_TABLE = os.environ.get("QUERY_LOG_TABLE", "QueryLog")
-DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "DrugPolicyCriteria")
-POLICY_DOCUMENTS_TABLE = os.environ.get("POLICY_DOCUMENTS_TABLE", "PolicyDocuments")
-POLICY_DIFFS_TABLE = os.environ.get("POLICY_DIFFS_TABLE", "PolicyDiffs")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-5-20250514")
+QUERY_LOG_TABLE = os.environ.get("QUERY_LOG_TABLE", "")
+DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "")
+POLICY_DOCUMENTS_TABLE = os.environ.get("POLICY_DOCUMENTS_TABLE", "")
+POLICY_DIFFS_TABLE = os.environ.get("POLICY_DIFFS_TABLE", "")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
 
 dynamodb = boto3.resource("dynamodb")
 bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
@@ -236,6 +236,8 @@ def submit_query(body: dict) -> dict:
     query_text = body.get("queryText", "").strip()
     if not query_text:
         return _response(400, {"error": "queryText is required"})
+    if len(query_text) > 2000:
+        return _response(400, {"error": "queryText exceeds maximum length of 2000 characters"})
 
     start_time = time.time()
     query_id = str(uuid.uuid4())
@@ -355,4 +357,4 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     except Exception as e:
         logger.exception(f"Unhandled error: {e}")
-        return _response(500, {"error": "Internal server error", "detail": str(e)})
+        return _response(500, {"error": "Internal server error"})

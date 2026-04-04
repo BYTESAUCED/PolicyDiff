@@ -16,8 +16,6 @@ from constructs import Construct
 from cdk_nag import NagSuppressions
 from lib.storage_stack import PolicyDiffStorageStack
 
-BEDROCK_MODEL_ARN = "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-5"
-
 
 class PolicyDiffComputeStack(cdk.Stack):
     def __init__(

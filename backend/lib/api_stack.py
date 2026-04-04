@@ -1,6 +1,7 @@
 # Owner: AZ
 # PolicyDiffApiStack — HTTP API (V2) with Auth0 JWT authorizer, 22 routes.
 
+import warnings
 import aws_cdk as cdk
 from aws_cdk import (
     aws_apigatewayv2 as apigwv2,
@@ -22,6 +23,13 @@ class PolicyDiffApiStack(cdk.Stack):
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        if not auth0_domain or not auth0_audience:
+            warnings.warn(
+                "AUTH0_DOMAIN or AUTH0_AUDIENCE not set — all API routes will be UNAUTHENTICATED. "
+                "Set these in backend/.env before deploying to production.",
+                stacklevel=2,
+            )
 
         # ADR: HTTP API V2 over REST API V1 | V2 natively supports JWT authorizers; simpler + cheaper
         http_api = apigwv2.HttpApi(
