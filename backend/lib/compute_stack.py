@@ -447,12 +447,16 @@ class PolicyDiffComputeStack(cdk.Stack):
             iam_resources=["*"],
         )
 
+        # ADR: MaxResults=1 on GetDocumentAnalysis | Fetches only JobStatus, not full block JSON.
+        # Full blocks are written to S3 via OutputConfig; assemble_text reads them from there.
+        # Without this, large PDFs exceed the 256KB Step Functions state size limit.
         poll_textract = sfn_tasks.CallAwsService(
             self, "PollTextractJob",
             service="textract",
             action="getDocumentAnalysis",
             parameters={
                 "JobId": sfn.JsonPath.string_at("$.textractResult.JobId"),
+                "MaxResults": 1,
             },
             result_path="$.pollResult",
             iam_resources=["*"],
