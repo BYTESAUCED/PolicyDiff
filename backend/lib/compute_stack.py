@@ -9,6 +9,7 @@ from aws_cdk import (
     aws_iam as iam,
     aws_events as events,
     aws_events_targets as targets,
+    aws_logs as logs,
     aws_stepfunctions as sfn,
     aws_stepfunctions_tasks as sfn_tasks,
 )
@@ -572,6 +573,14 @@ class PolicyDiffComputeStack(cdk.Stack):
         embed_and_index.next(trigger_diff_state)
 
         # ADR: Express Workflow | Cost-effective for short-lived executions; 15 min covers Textract + Bedrock
+        log_group = logs.LogGroup(
+            self, "ExtractionWorkflowLogs",
+            log_group_name="/aws/states/PolicyDiffExtractionWorkflow",
+            retention=logs.RetentionDays.ONE_WEEK,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+        log_group.grant_write(workflow_role)
+
         self.extraction_workflow = sfn.StateMachine(
             self, "ExtractionWorkflow",
             state_machine_name="PolicyDiffExtractionWorkflow",
@@ -579,6 +588,11 @@ class PolicyDiffComputeStack(cdk.Stack):
             definition_body=sfn.DefinitionBody.from_chainable(definition),
             role=workflow_role,
             timeout=cdk.Duration.minutes(15),
+            logs=sfn.LogOptions(
+                destination=log_group,
+                level=sfn.LogLevel.ALL,
+                include_execution_data=True,
+            ),
         )
 
         # ADR: upload_url_fn excluded | Workflow is triggered by EventBridge on S3 ObjectCreated, not by Lambda
@@ -651,7 +665,6 @@ class PolicyDiffComputeStack(cdk.Stack):
             ], apply_to_children=True)
 
         NagSuppressions.add_resource_suppressions(self.extraction_workflow, [
-            {"id": "AwsSolutions-SF1", "reason": "CloudWatch logging for Express Workflow adds cost; acceptable for hackathon scope"},
             {"id": "AwsSolutions-SF2", "reason": "X-Ray tracing adds cost; acceptable for hackathon scope"},
         ])
 
