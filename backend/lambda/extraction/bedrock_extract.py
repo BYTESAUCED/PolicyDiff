@@ -30,9 +30,40 @@ logger.setLevel(logging.INFO)
 
 s3 = boto3.client("s3")
 bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+dynamodb = boto3.resource("dynamodb")
 
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-5-20250514")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
+if not BEDROCK_MODEL_ID:
+    logger.warning(json.dumps({"warning": "missing_env_var", "var": "BEDROCK_MODEL_ID"}))
 MAX_DOCUMENT_CHARS = 180_000
+
+
+def _enrich_event_from_dynamo(event: dict) -> dict:
+    """Fetch real metadata from PolicyDocuments if payerName is missing."""
+    if event.get("payerName"):
+        return event  # Already have metadata
+
+    policy_doc_id = event.get("policyDocId")
+    if not policy_doc_id:
+        return event
+
+    table_name = os.environ.get("POLICY_DOCUMENTS_TABLE")
+    if not table_name:
+        return event
+
+    try:
+        table = dynamodb.Table(table_name)
+        result = table.get_item(
+            Key={"policyDocId": policy_doc_id},
+            ProjectionExpression="payerName, planType, documentTitle, effectiveDate, drugName",
+        )
+        item = result.get("Item")
+        if item:
+            return {**event, **{k: v for k, v in item.items() if v}}
+    except Exception as e:
+        logger.warning(json.dumps({"warning": "dynamo_enrich_failed", "detail": str(e)}))
+
+    return event
 
 
 def _invoke_bedrock(prompt: str, max_tokens: int = 8192) -> str:
@@ -125,7 +156,7 @@ def _extract_icd10_mapping(document_text: str) -> str:
         parsed = json.loads(cleaned)
         return json.dumps(parsed, default=str)
     except Exception as e:
-        logger.warning(f"ICD-10 pre-extraction failed (non-fatal): {e}")
+        logger.warning(json.dumps({"warning": "icd10_extraction_failed", "detail": str(e)}))
         return json.dumps({"icd10Mapping": []})
 
 
@@ -194,7 +225,7 @@ def _format_prompt(prompt_template: str, prompt_id: str, event: dict,
     try:
         return prompt_template.format(**fmt_kwargs)
     except KeyError as e:
-        logger.warning(f"Missing template variable {e} for prompt {prompt_id}, using partial format")
+        logger.warning(json.dumps({"warning": "missing_template_variable", "promptId": prompt_id, "detail": str(e)}))
         # Fallback: manually replace known keys
         result = prompt_template
         for key, value in fmt_kwargs.items():
@@ -220,6 +251,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         "extractionPromptId": event.get("extractionPromptId"),
     }))
 
+    event = _enrich_event_from_dynamo(event)
+
     policy_doc_id: str = event["policyDocId"]
     s3_bucket: str = event["s3Bucket"]
     structured_key: str = event["structuredTextS3Key"]
@@ -227,7 +260,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     # Check if this document class should skip extraction
     skip_extraction: bool = event.get("skipExtraction", False)
     if skip_extraction:
-        logger.info(f"Skipping extraction for document class: {event.get('documentClass')}")
+        logger.info(json.dumps({"action": "extraction_skipped", "documentClass": event.get("documentClass")}))
         return {
             **event,
             "extractedCriteria": [],
@@ -251,14 +284,14 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # 2. Select prompt template
     prompt_template, resolved_prompt_id = _get_prompt_template(prompt_id, payer_name, doc_class)
-    logger.info(f"Using prompt {resolved_prompt_id} for {payer_name} / {doc_class}")
+    logger.info(json.dumps({"action": "prompt_selected", "promptId": resolved_prompt_id, "payerName": payer_name, "docClass": doc_class}))
 
     # 3. ICD-10 pre-extraction pass (for drug-specific prompts A/B/C and generic)
     icd10_json = '{"icd10Mapping": []}'
     if resolved_prompt_id in ("A", "B", "C", "generic"):
-        logger.info("Running ICD-10 pre-extraction pass...")
+        logger.info(json.dumps({"action": "icd10_extraction_start"}))
         icd10_json = _extract_icd10_mapping(raw_text)
-        logger.info(f"ICD-10 pre-extraction result: {icd10_json[:200]}")
+        logger.info(json.dumps({"action": "icd10_extraction_complete", "resultPreview": icd10_json[:100]}))
 
     # 4. Run extraction — either per-indication chunks or full document
     all_criteria: list[dict] = []
@@ -267,7 +300,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         # Parallel-friendly: one prompt per indication chunk
         for chunk_idx, chunk_data in enumerate(indication_chunks):
             chunk_text = chunk_data.get("preamble", "") + "\n\n" + chunk_data.get("indicationText", "")
-            logger.info(f"Processing indication chunk {chunk_idx + 1}/{len(indication_chunks)} ({len(chunk_text)} chars)")
+            logger.info(json.dumps({"action": "processing_chunk", "chunkIndex": chunk_idx + 1, "totalChunks": len(indication_chunks), "charCount": len(chunk_text)}))
 
             prompt = _format_prompt(prompt_template, resolved_prompt_id, event, chunk_text, icd10_json)
 
@@ -281,16 +314,16 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 elif isinstance(parsed, dict):
                     all_criteria.append(parsed)
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse Bedrock response for chunk {chunk_idx}: {e}")
+                logger.error(json.dumps({"error": "bedrock_parse_failed", "chunkIndex": chunk_idx, "detail": str(e)}))
             except Exception as e:
-                logger.error(f"Bedrock invocation failed for chunk {chunk_idx}: {e}")
+                logger.error(json.dumps({"error": "bedrock_invocation_failed", "chunkIndex": chunk_idx, "detail": str(e)}))
                 raise
     else:
         # Standard: chunk by context window size
         chunks = _chunk_document(raw_text)
 
         for chunk_idx, chunk in enumerate(chunks):
-            logger.info(f"Processing chunk {chunk_idx + 1}/{len(chunks)} ({len(chunk)} chars)")
+            logger.info(json.dumps({"action": "processing_chunk", "chunkIndex": chunk_idx + 1, "totalChunks": len(chunks), "charCount": len(chunk)}))
 
             prompt = _format_prompt(prompt_template, resolved_prompt_id, event, chunk, icd10_json)
 
@@ -304,13 +337,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 elif isinstance(parsed, dict):
                     all_criteria.append(parsed)
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse Bedrock response as JSON: {e}")
-                logger.error(f"Raw response: {response_text[:500]}")
+                logger.error(json.dumps({"error": "bedrock_json_parse_failed", "detail": str(e)}))
             except Exception as e:
-                logger.error(f"Bedrock invocation failed: {e}")
+                logger.error(json.dumps({"error": "bedrock_invocation_failed", "detail": str(e)}))
                 raise
 
-    logger.info(f"Extracted {len(all_criteria)} drug-indication criteria records")
+    logger.info(json.dumps({"action": "extraction_complete", "criteriaCount": len(all_criteria)}))
 
     # 5. Enrich each record with denormalized metadata
     for record in all_criteria:

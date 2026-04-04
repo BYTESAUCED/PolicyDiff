@@ -52,6 +52,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         policy_doc_id = str(uuid.uuid4())
         s3_key = f"raw/{policy_doc_id}/raw.pdf"
 
+        # ADR: ContentLength not enforceable on presigned PUT | Use S3 Object Lambda or bucket policy for size limits
+        # Max 50MB enforced client-side; server-side enforcement requires presigned POST (not PUT)
         upload_url = s3_client.generate_presigned_url(
             "put_object",
             Params={

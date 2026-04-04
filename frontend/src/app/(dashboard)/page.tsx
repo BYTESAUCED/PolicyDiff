@@ -134,6 +134,12 @@ const recentComparisons = [
     },
 ];
 
+const watchedDrugBlockClasses = [
+    "bg-card hover:bg-muted/20",
+    "bg-card hover:bg-muted/20",
+    "bg-card hover:bg-muted/20",
+];
+
 
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -262,8 +268,15 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="grid grid-cols-3 border border-border dark:border-white/10 rounded-lg divide-x divide-border dark:divide-white/10 bg-transparent">
-                    {watchedDrugs.map((drug) => (
-                        <Link key={drug.name} href="/explorer" className="block group cursor-pointer px-5 py-5 hover:bg-muted/20 transition-colors">
+                    {watchedDrugs.map((drug, index) => (
+                        <Link
+                            key={drug.name}
+                            href="/explorer"
+                            className={cn(
+                                "block group cursor-pointer px-5 py-5 transition-colors",
+                                watchedDrugBlockClasses[index % watchedDrugBlockClasses.length],
+                            )}
+                        >
                             <div className="space-y-4">
                                 <div className="flex items-start justify-between gap-2">
                                     <div className="flex items-center gap-1.5">
@@ -354,9 +367,9 @@ export default function DashboardPage() {
                             </Button>
                         </Link>
                     </div>
-                    <div className="border border-border dark:border-white/10 rounded-lg divide-y divide-border dark:divide-white/10 bg-transparent">
+                    <div className="rounded-lg border border-border dark:border-white/10 divide-y divide-border dark:divide-white/10 bg-transparent">
                         {recentComparisons.map((comp, i) => (
-                            <Link key={i} href={comp.href} className="block group cursor-pointer hover:bg-muted/20 transition-colors first:rounded-t-lg last:rounded-b-lg">
+                            <Link key={i} href={comp.href} className="block group cursor-pointer bg-card hover:bg-muted/20 transition-colors first:rounded-t-lg last:rounded-b-lg">
                                 <div className="px-4 py-4">
                                     <div className="flex items-center justify-between gap-2">
                                         <div className="flex items-center gap-1.5">

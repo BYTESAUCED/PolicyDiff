@@ -206,7 +206,7 @@ def _retrieve_policy_data(query_text: str) -> str:
             )
             all_records.extend(result.get("Items", []))
         except Exception as e:
-            logger.warning(f"Failed to query criteria for drug {generic}: {e}")
+            logger.warning(json.dumps({"warning": "criteria_query_failed", "drug": generic, "detail": str(e)}))
 
     # If no drug-specific results, do a broad scan
     if not all_records:
@@ -214,7 +214,7 @@ def _retrieve_policy_data(query_text: str) -> str:
             result = criteria_table.scan(Limit=50)
             all_records = result.get("Items", [])
         except Exception as e:
-            logger.warning(f"Failed to scan criteria table: {e}")
+            logger.warning(json.dumps({"warning": "criteria_scan_failed", "detail": str(e)}))
 
     # Filter by mentioned payers if applicable
     if mentioned_payers:
@@ -231,7 +231,7 @@ def _retrieve_policy_data(query_text: str) -> str:
 
 # ── Route handlers ────────────────────────────────────────────────────────
 
-def submit_query(body: dict) -> dict:
+def submit_query(body: dict, event: dict) -> dict:
     """POST /api/query — run NL query, return answer immediately."""
     query_text = body.get("queryText", "").strip()
     if not query_text:
@@ -261,7 +261,7 @@ def submit_query(body: dict) -> dict:
         cleaned = _clean_json(raw_response)
         result = json.loads(cleaned)
     except Exception as e:
-        logger.error(f"Query AI processing failed: {e}")
+        logger.error(json.dumps({"error": "query_ai_failed", "detail": str(e)}))
         result = {
             "queryType": "unknown",
             "answer": "I was unable to process your query. Please try rephrasing.",
@@ -275,20 +275,29 @@ def submit_query(body: dict) -> dict:
     query_log_table = dynamodb.Table(QUERY_LOG_TABLE)
     now = datetime.now(timezone.utc).isoformat()
 
+    try:
+        user_id = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {}).get("sub", "")
+    except Exception:
+        user_id = ""
+
     log_entry = {
         "queryId": query_id,
-        "queryText": query_text,
+        # ADR: queryText truncated to 200 chars | Prevents PHI persistence if user types patient data
+        "queryText": query_text[:200],
         "queryType": result.get("queryType", "unknown"),
-        "resultSummary": result.get("answer", ""),
+        "resultSummary": result.get("answer", "")[:500],
         "citations": result.get("citations", []),
         "responseTimeMs": response_time_ms,
         "createdAt": now,
     }
+    if user_id:
+        import hashlib
+        log_entry["userId"] = hashlib.sha256(user_id.encode()).hexdigest()[:12]
 
     try:
         query_log_table.put_item(Item=_convert_floats(log_entry))
     except Exception as e:
-        logger.warning(f"Failed to write query log: {e}")
+        logger.warning(json.dumps({"warning": "query_log_write_failed", "detail": str(e)}))
 
     return _response(200, {
         "queryId": query_id,
@@ -310,11 +319,27 @@ def get_query(query_id: str) -> dict:
     return _response(200, item)
 
 
-def list_queries() -> dict:
-    """GET /api/queries — list recent 20 queries."""
+def list_queries(event: dict) -> dict:
+    """GET /api/queries — list recent 20 queries for the calling user."""
     table = dynamodb.Table(QUERY_LOG_TABLE)
+
+    try:
+        user_id = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {}).get("sub", "")
+    except Exception:
+        user_id = ""
+
+    if user_id:
+        import hashlib
+        user_id_hash = hashlib.sha256(user_id.encode()).hexdigest()[:12]
+    else:
+        user_id_hash = ""
+
     result = table.scan(Limit=20)
     items = result.get("Items", [])
+
+    if user_id_hash:
+        items = [i for i in items if i.get("userId") == user_id_hash]
+
     items.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
     return _response(200, {"queries": items, "count": len(items)})
 
@@ -356,10 +381,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     try:
         if http_method == "POST" and resource == "/api/query":
             body = json.loads(event.get("body") or "{}")
-            return submit_query(body)
+            return submit_query(body, event)
 
         elif http_method == "GET" and resource == "/api/queries":
-            return list_queries()
+            return list_queries(event)
 
         elif http_method == "GET" and resource.startswith("/api/query/"):
             return get_query(path_params.get("queryId", ""))
@@ -368,5 +393,5 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _response(404, {"error": "Not found"})
 
     except Exception as e:
-        logger.exception(f"Unhandled error: {e}")
+        logger.error(json.dumps({"error": "unhandled_exception", "detail": str(e)}))
         return _response(500, {"error": "Internal server error"})

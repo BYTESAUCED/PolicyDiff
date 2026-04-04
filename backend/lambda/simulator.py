@@ -38,6 +38,6 @@ def create_response(status_code: int, body: dict) -> dict:
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    logger.info(json.dumps({"action": "simulator_request", "event": event}))
+    logger.info(json.dumps({"action": "simulator_request", "requestId": (event.get("requestContext") or {}).get("requestId")}))
 
     return create_response(200, {"message": "SimulatorLambda stub — implement AI logic here"})
