@@ -412,6 +412,8 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         # ADR: OutputConfig on StartDocumentAnalysis | Writes Textract blocks to S3 so assemble_text
         # can read them via textractOutputKey; without this assemble_text has no blocks to process
+        # ADR: OutputConfig prefix uses s3Key (not policyDocId) | policyDocId is parsed later by assemble_text;
+        # s3Key format is raw/{policyDocId}/raw.pdf so prefix is deterministic
         start_textract = sfn_tasks.CallAwsService(
             self, "StartTextractJob",
             service="textract",
@@ -426,7 +428,7 @@ class PolicyDiffComputeStack(cdk.Stack):
                 "FeatureTypes": ["TABLES", "FORMS"],
                 "OutputConfig": {
                     "S3Bucket": sfn.JsonPath.string_at("$.s3Bucket"),
-                    "S3Prefix": sfn.JsonPath.format("textract-output/{}", sfn.JsonPath.string_at("$.policyDocId")),
+                    "S3Prefix": "textract-output",
                 },
             },
             result_path="$.textractResult",
@@ -557,14 +559,14 @@ class PolicyDiffComputeStack(cdk.Stack):
         write_to_dynamo.next(embed_and_index)
         embed_and_index.next(trigger_diff_state)
 
-        # ADR: Express Workflow | Cost-effective for short-lived executions (<5 min)
+        # ADR: Express Workflow | Cost-effective for short-lived executions; 15 min covers Textract + Bedrock
         self.extraction_workflow = sfn.StateMachine(
             self, "ExtractionWorkflow",
             state_machine_name="PolicyDiffExtractionWorkflow",
             state_machine_type=sfn.StateMachineType.EXPRESS,
             definition_body=sfn.DefinitionBody.from_chainable(definition),
             role=workflow_role,
-            timeout=cdk.Duration.minutes(5),
+            timeout=cdk.Duration.minutes(15),
         )
 
         # ADR: upload_url_fn excluded | Workflow is triggered by EventBridge on S3 ObjectCreated, not by Lambda
