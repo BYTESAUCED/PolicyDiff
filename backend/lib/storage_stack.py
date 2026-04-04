@@ -1,10 +1,11 @@
 # Owner: AZ
-# PolicyDiffStorageStack — S3 bucket, 6 DynamoDB tables, no Secrets Manager.
+# PolicyDiffStorageStack — S3 bucket, S3 Vectors bucket + index, 6 DynamoDB tables.
 
 import aws_cdk as cdk
 from aws_cdk import (
     aws_s3 as s3,
     aws_dynamodb as dynamodb,
+    aws_s3vectors as s3vectors,
 )
 from constructs import Construct
 
@@ -165,9 +166,26 @@ class PolicyDiffStorageStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.RETAIN,
         )
 
+        # ADR: S3 Vectors L1 construct | aws_s3vectors L2 not yet available; CfnVectorBucket is the only option
+        self.vectors_bucket = s3vectors.CfnVectorBucket(
+            self, "VectorsBucket",
+            vector_bucket_name=f"policydiff-vectors-{cdk.Aws.ACCOUNT_ID}-{cdk.Aws.REGION}",
+        )
+
+        self.vectors_index = s3vectors.CfnIndex(
+            self, "PolicyCriteriaIndex",
+            vector_bucket_name=self.vectors_bucket.ref,
+            index_name="policy-criteria-index",
+            data_type="float32",
+            dimension=1536,
+            distance_metric="cosine",
+        )
+        self.vectors_index.add_dependency(self.vectors_bucket)
+
         # CloudFormation exports
         cdk.CfnOutput(self, "DocumentsBucketArn", value=self.policy_bucket.bucket_arn, export_name="DocumentsBucketArn")
         cdk.CfnOutput(self, "DocumentsBucketName", value=self.policy_bucket.bucket_name, export_name="DocumentsBucketName")
+        cdk.CfnOutput(self, "VectorsBucketName", value=self.vectors_bucket.ref, export_name="VectorsBucketName")
 
         cdk.CfnOutput(self, "PolicyDocumentsTableName", value=self.policy_documents_table.table_name, export_name="PolicyDocumentsTableName")
         cdk.CfnOutput(self, "PolicyDocumentsTableArn", value=self.policy_documents_table.table_arn, export_name="PolicyDocumentsTableArn")

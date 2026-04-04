@@ -157,6 +157,23 @@ class PolicyDiffComputeStack(cdk.Stack):
             environment=common_env,
         )
 
+        TITAN_EMBED_ARN = "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"
+
+        self.embed_index_fn = lambda_.Function(
+            self, "EmbedAndIndexLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="embed_and_index.lambda_handler",
+            code=lambda_code,
+            architecture=lambda_arch,
+            timeout=cdk.Duration.seconds(120),
+            memory_size=512,
+            environment={
+                **common_env,
+                "VECTORS_BUCKET_NAME": storage_stack.vectors_bucket.ref,
+                "TITAN_MODEL_ARN": TITAN_EMBED_ARN,
+            },
+        )
+
         # ── IAM grants ───────────────────────────────────────────────────────
 
         # UploadUrlLambda
@@ -225,6 +242,32 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         # SimulatorLambda
         storage_stack.drug_policy_criteria_table.grant_read_data(self.simulator_fn)
+
+        # EmbedAndIndexLambda
+        storage_stack.policy_bucket.grant_read(self.embed_index_fn)
+        self.embed_index_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=["arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"],
+        ))
+        self.embed_index_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["s3vectors:PutVectors"],
+            resources=[f"arn:aws:s3vectors:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:bucket/policydiff-vectors-{cdk.Aws.ACCOUNT_ID}-{cdk.Aws.REGION}/index/policy-criteria-index"],
+        ))
+        NagSuppressions.add_resource_suppressions(self.embed_index_fn, [
+            {"id": "AwsSolutions-IAM4", "reason": "AWSLambdaBasicExecutionRole is the minimal required managed policy for Lambda CloudWatch logging"},
+            {"id": "AwsSolutions-L1", "reason": "python3.12 is the latest stable Lambda runtime used per project standards"},
+            {"id": "AwsSolutions-IAM5", "reason": "S3 object-level access requires key prefix wildcard"},
+        ], apply_to_children=True)
+
+        # QueryLambda — S3 Vectors semantic search + Titan embeddings for query-time embedding
+        self.query_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=["arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"],
+        ))
+        self.query_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["s3vectors:QueryVectors"],
+            resources=[f"arn:aws:s3vectors:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:bucket/policydiff-vectors-{cdk.Aws.ACCOUNT_ID}-{cdk.Aws.REGION}/index/policy-criteria-index"],
+        ))
 
         # ── ExtractionWorkflow execution role ────────────────────────────────
 
@@ -346,6 +389,19 @@ class PolicyDiffComputeStack(cdk.Stack):
         trigger_diff_choice = sfn.Choice(self, "TriggerDiffIfVersionExists")
         has_previous_version = sfn.Condition.is_present("$.previousVersionId")
 
+        # State 6.5 — EmbedAndIndex (non-blocking: catches all errors and continues)
+        embed_and_index = sfn_tasks.LambdaInvoke(
+            self, "EmbedAndIndex",
+            lambda_function=self.embed_index_fn,
+            payload=sfn.TaskInput.from_json_path_at("$"),
+            result_path="$.embedResult",
+            payload_response_only=True,
+        )
+        embed_and_index.add_catch(
+            trigger_diff_choice,
+            errors=["States.ALL"],
+            result_path="$.embedError",
+        )
         # Wire polling loop with retry
         poll_textract.add_retry(
             errors=["States.ALL"],
@@ -376,7 +432,8 @@ class PolicyDiffComputeStack(cdk.Stack):
         assemble_text.next(bedrock_extraction)
         bedrock_extraction.next(confidence_scoring)
         confidence_scoring.next(write_to_dynamo)
-        write_to_dynamo.next(trigger_diff_choice)
+        write_to_dynamo.next(embed_and_index)
+        embed_and_index.next(trigger_diff_choice)
 
         # ADR: Express Workflow | Cost-effective for short-lived executions (<5 min)
         self.extraction_workflow = sfn.StateMachine(
@@ -431,6 +488,7 @@ class PolicyDiffComputeStack(cdk.Stack):
             self.upload_url_fn, self.policy_crud_fn, self.policy_monitor_fn,
             self.query_fn, self.compare_fn, self.diff_fn,
             self.discordance_fn, self.approval_path_fn, self.simulator_fn,
+            self.embed_index_fn,
         ]
 
         for fn in _lambda_fns:
@@ -493,4 +551,8 @@ class PolicyDiffComputeStack(cdk.Stack):
         cdk.CfnOutput(self, "SimulatorFunctionArn",
             value=self.simulator_fn.function_arn,
             export_name="SimulatorFunctionArn",
+        )
+        cdk.CfnOutput(self, "EmbedIndexFunctionArn",
+            value=self.embed_index_fn.function_arn,
+            export_name="EmbedIndexFunctionArn",
         )
