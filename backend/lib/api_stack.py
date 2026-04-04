@@ -31,7 +31,17 @@ class PolicyDiffApiStack(cdk.Stack):
                 stacklevel=2,
             )
 
+        # ADR: jwt_authorizer created before HttpApi | Required to pass as default_authorizer
+        jwt_authorizer = None
+        if auth0_domain and auth0_audience:
+            jwt_authorizer = authorizers.HttpJwtAuthorizer(
+                "Auth0JwtAuthorizer",
+                f"https://{auth0_domain}/",
+                jwt_audience=[auth0_audience],
+            )
+
         # ADR: HTTP API V2 over REST API V1 | V2 natively supports JWT authorizers; simpler + cheaper
+        # ADR: default_authorizer set at API level | Prevents routes from being accidentally added without auth
         http_api = apigwv2.HttpApi(
             self, "PolicyDiffHttpApi",
             api_name="policydiff-api",
@@ -40,17 +50,8 @@ class PolicyDiffApiStack(cdk.Stack):
                 allow_methods=[apigwv2.CorsHttpMethod.ANY],
                 allow_headers=["Content-Type", "Authorization", "X-Api-Key", "X-Amz-Security-Token"],
             ),
-            default_authorizer=None,
+            default_authorizer=jwt_authorizer if jwt_authorizer else None,
         )
-
-        # Auth0 JWT authorizer — only created when auth0_domain is provided
-        jwt_authorizer = None
-        if auth0_domain and auth0_audience:
-            jwt_authorizer = authorizers.HttpJwtAuthorizer(
-                "Auth0JwtAuthorizer",
-                f"https://{auth0_domain}/",
-                jwt_audience=[auth0_audience],
-            )
 
         def add_route(path: str, method: apigwv2.HttpMethod, fn):
             integration = integrations.HttpLambdaIntegration(

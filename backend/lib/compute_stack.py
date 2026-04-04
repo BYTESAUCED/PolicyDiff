@@ -54,6 +54,7 @@ class PolicyDiffComputeStack(cdk.Stack):
             "REGION": cdk.Aws.REGION,
             # Fix 3: BEDROCK_MODEL_ID was missing — all Bedrock Lambdas need this
             "BEDROCK_MODEL_ID": bedrock_model_arn,
+            "CORS_ORIGIN": "*",  # Explicit wildcard; override at deploy time for production
         }
 
         # ── Lambda definitions ────────────────────────────────────────────────
@@ -410,6 +411,16 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         # ── Step Functions states ─────────────────────────────────────────────
 
+        # ADR: ExtractPolicyDocId Pass state | EventBridge can't split strings; intrinsic fn extracts segment 1
+        extract_policy_doc_id = sfn.Pass(
+            self, "ExtractPolicyDocId",
+            parameters={
+                "s3Bucket.$": "$.s3Bucket",
+                "s3Key.$": "$.s3Key",
+                "policyDocId.$": "States.ArrayGetItem(States.StringSplit($.s3Key, '/'), 1)",
+            },
+        )
+
         # ADR: OutputConfig on StartDocumentAnalysis | Writes Textract blocks to S3 so assemble_text
         # can read them via textractOutputKey; without this assemble_text has no blocks to process
         # ADR: OutputConfig prefix uses s3Key (not policyDocId) | policyDocId is parsed later by assemble_text;
@@ -547,7 +558,8 @@ class PolicyDiffComputeStack(cdk.Stack):
         diff_branch = trigger_diff_state.next(execution_complete)
 
         definition = sfn.Chain.start(
-            start_textract
+            extract_policy_doc_id
+            .next(start_textract)
             .next(poll_textract)
             .next(textract_complete)
         )

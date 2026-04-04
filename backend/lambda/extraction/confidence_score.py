@@ -178,10 +178,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             review_count += 1
         scored_criteria.append(scored)
 
-    logger.info(
-        f"Confidence scoring complete: {len(scored_criteria)} records, "
-        f"{review_count} flagged for review (payer={payer_name})"
-    )
+    logger.info(json.dumps({
+        "action": "confidence_scoring_complete",
+        "totalRecords": len(scored_criteria),
+        "reviewCount": review_count,
+        "payerName": payer_name,
+    }))
 
     # Build confidence summary
     confidences = [r["confidence"] for r in scored_criteria]

@@ -163,6 +163,13 @@ def score_approval_path(body: dict) -> dict:
     if not drug_name or not indication_name:
         return _response(400, {"error": "drugName and indicationName are required"})
 
+    if icd10_code and len(icd10_code) > 20:
+        return _response(400, {"error": "icd10Code too long"})
+
+    profile_str = json.dumps(patient_profile)
+    if len(profile_str) > 50000:
+        return _response(400, {"error": "patientProfile too large"})
+
     # 1. Fetch criteria for this drug across all payers
     criteria_table = dynamodb.Table(DRUG_POLICY_CRITERIA_TABLE)
     result = criteria_table.query(
@@ -240,7 +247,7 @@ def score_approval_path(body: dict) -> dict:
             cleaned = _clean_json(raw)
             scoring = json.loads(cleaned)
         except Exception as e:
-            logger.error(f"Bedrock scoring failed for {payer_name}: {e}")
+            logger.error(json.dumps({"error": "bedrock_scoring_failed", "payerName": payer_name, "detail": str(e)}))
             scoring = {
                 "score": 0,
                 "status": "likely_denied",
@@ -287,7 +294,7 @@ def score_approval_path(body: dict) -> dict:
     try:
         approval_table.put_item(Item=approval_record)
     except Exception as e:
-        logger.warning(f"Failed to store approval path: {e}")
+        logger.warning(json.dumps({"warning": "approval_path_store_failed", "detail": str(e)}))
 
     return _response(200, {
         "approvalPathId": approval_path_id,
@@ -369,7 +376,7 @@ def generate_memo(approval_path_id: str, body: dict) -> dict:
         scoring = json.loads(cleaned)
         memo = scoring.get("memo")
     except Exception as e:
-        logger.error(f"Memo regeneration failed: {e}")
+        logger.error(json.dumps({"error": "memo_regeneration_failed", "detail": str(e)}))
         return _response(500, {"error": "Memo generation failed"})
 
     if not memo:
@@ -428,5 +435,5 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _response(404, {"error": "Not found"})
 
     except Exception as e:
-        logger.exception(f"Unhandled error: {e}")
+        logger.error(json.dumps({"error": "unhandled_exception", "detail": str(e)}))
         return _response(500, {"error": "Internal server error"})

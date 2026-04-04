@@ -25,6 +25,34 @@ POLICY_DOCUMENTS_TABLE = os.environ.get("POLICY_DOCUMENTS_TABLE", "PolicyDocumen
 dynamodb = boto3.resource("dynamodb")
 
 
+def _enrich_event_from_dynamo(event: dict) -> dict:
+    """Fetch real metadata from PolicyDocuments if payerName is missing."""
+    if event.get("payerName"):
+        return event  # Already have metadata
+
+    policy_doc_id = event.get("policyDocId")
+    if not policy_doc_id:
+        return event
+
+    table_name = os.environ.get("POLICY_DOCUMENTS_TABLE")
+    if not table_name:
+        return event
+
+    try:
+        table = dynamodb.Table(table_name)
+        result = table.get_item(
+            Key={"policyDocId": policy_doc_id},
+            ProjectionExpression="payerName, planType, documentTitle, effectiveDate, drugName",
+        )
+        item = result.get("Item")
+        if item:
+            return {**event, **{k: v for k, v in item.items() if v}}
+    except Exception as e:
+        logger.warning(json.dumps({"warning": "dynamo_enrich_failed", "detail": str(e)}))
+
+    return event
+
+
 def classify_document(payer_name: str, document_title: str, s3_key: str) -> dict:
     """Classify a policy document and determine extraction routing.
 
@@ -89,6 +117,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Classify document type and determine extraction routing."""
     logger.info(json.dumps({"state": "ClassifyDocument", "policyDocId": event.get("policyDocId")}))
 
+    event = _enrich_event_from_dynamo(event)
+
     payer_name = event.get("payerName", "")
     document_title = event.get("documentTitle", "")
     s3_key = event.get("s3Key", "")
@@ -118,7 +148,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             },
         )
     except Exception as e:
-        logger.warning(f"Failed to update policy document classification: {e}")
+        logger.warning(json.dumps({"warning": "classify_document_update_failed", "detail": str(e)}))
 
     return {
         **event,
