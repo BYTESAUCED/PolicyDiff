@@ -132,6 +132,25 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         return create_response(500, {"message": "Internal server error"})
 
 
+def _find_previous_version(table, payer_name: str, plan_type: str, drug_name: str) -> str | None:
+    # ADR: Server-side version linking | Prevents client from forging previousVersionId
+    try:
+        result = table.query(
+            IndexName="payerName-effectiveDate-index",
+            KeyConditionExpression=Key("payerName").eq(payer_name),
+        )
+        candidates = [
+            item for item in result.get("Items", [])
+            if item.get("planType") == plan_type and item.get("drugName") == drug_name
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda x: x.get("effectiveDate", ""))["policyDocId"]
+    except ClientError as e:
+        logger.error(json.dumps({"error": "find_previous_version_failed", "detail": str(e)}))
+        return None
+
+
 def handle_create_policy(event: dict) -> dict:
     if not require_admin(event):
         return create_response(403, {"message": "Forbidden: admin role required"})
@@ -161,9 +180,17 @@ def handle_create_policy(event: dict) -> dict:
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
     # Include optional fields if provided
-    for opt in ["s3Key", "version", "previousVersionId"]:
+    for opt in ["s3Key", "version", "drugName"]:
         if body.get(opt) is not None:
             item[opt] = body[opt]
+
+    # Auto-link previous version server-side when drugName is present
+    if body.get("drugName"):
+        previous_version_id = _find_previous_version(
+            table, body["payerName"], body["planType"], body.get("drugName", "")
+        )
+        if previous_version_id:
+            item["previousVersionId"] = previous_version_id
 
     table.put_item(Item=item)
     logger.info(json.dumps({"action": "policy_created", "policyDocId": item["policyDocId"]}))

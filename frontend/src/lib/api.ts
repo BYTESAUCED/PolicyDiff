@@ -19,6 +19,13 @@ export interface PolicyRecord {
   fileName: string;
   status: "PENDING" | "PROCESSING" | "COMPLETE" | "FAILED" | "DELETED";
   createdAt: string;
+  planType?: string;
+  drugName?: string;
+  documentTitle?: string;
+  effectiveDate?: string;
+  extractionStatus?: string;
+  s3Key?: string;
+  previousVersionId?: string;
 }
 
 export interface DrugCriteria {
@@ -30,22 +37,43 @@ export interface DrugCriteria {
 }
 
 /** POST /api/policies/upload-url */
-export async function getUploadUrl(_body: {
+export async function getUploadUrl(body: {
   fileName: string;
   contentType: string;
 }): Promise<UploadUrlResponse> {
-  // TODO: implement
-  throw new Error("Not implemented");
+  const res = await fetch(`${BASE_URL}/api/policies/upload-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`getUploadUrl failed: ${res.status}`);
+  return res.json();
 }
 
 /** POST /api/policies */
-export async function createPolicy(_body: {
-  policyDocId: string;
-  payerName: string;
-  effectiveDate: string;
-}): Promise<PolicyRecord> {
-  // TODO: implement
-  throw new Error("Not implemented");
+export async function createPolicy(
+  body: {
+    policyDocId: string;
+    payerName: string;
+    planType?: string;
+    drugName?: string;
+    documentTitle?: string;
+    effectiveDate?: string;
+    s3Key?: string;
+  },
+  authToken?: string
+): Promise<PolicyRecord> {
+  const token = authToken ?? localStorage.getItem("auth_token") ?? "";
+  const res = await fetch(`${BASE_URL}/api/policies`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`createPolicy failed: ${res.status}`);
+  return res.json();
 }
 
 /** GET /api/policies/:id */
@@ -56,10 +84,12 @@ export async function getPolicy(_id: string): Promise<PolicyRecord> {
 
 /** GET /api/policies/:id/status */
 export async function getPolicyStatus(
-  _id: string
-): Promise<{ status: PolicyRecord["status"] }> {
-  // TODO: implement
-  throw new Error("Not implemented");
+  id: string
+): Promise<{ status: string }> {
+  const res = await fetch(`${BASE_URL}/api/policies/${id}/status`);
+  if (!res.ok) throw new Error(`getPolicyStatus failed: ${res.status}`);
+  const data = await res.json();
+  return { status: data.extractionStatus };
 }
 
 /** GET /api/policies/:id/criteria */
