@@ -1,5 +1,5 @@
 {
-  "app": "python bin/app.py",
+  "app": "PYTHONPATH=. python3 bin/app.py",
   "context": {
     "@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId": true,
     "@aws-cdk/core:stackRelativeExports": true,
