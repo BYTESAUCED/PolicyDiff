@@ -304,12 +304,14 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         # DiscordanceLambda
         storage_stack.drug_policy_criteria_table.grant_read_data(self.discordance_fn)
-        storage_stack.policy_diffs_table.grant_read_data(self.discordance_fn)
+        # ADR: grant_read_write_data | get_discordance_detail writes computed results to PolicyDiffs
+        storage_stack.policy_diffs_table.grant_read_write_data(self.discordance_fn)
 
         # ApprovalPathLambda
         storage_stack.drug_policy_criteria_table.grant_read_data(self.approval_path_fn)
         storage_stack.policy_documents_table.grant_read_data(self.approval_path_fn)
-        storage_stack.approval_paths_table.grant_write_data(self.approval_path_fn)
+        # ADR: grant_read_write_data | generate_memo reads existing records; score_approval_path writes new ones
+        storage_stack.approval_paths_table.grant_read_write_data(self.approval_path_fn)
         self.approval_path_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
             resources=[BEDROCK_MODEL_ARN],
@@ -408,6 +410,8 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         # ── Step Functions states ─────────────────────────────────────────────
 
+        # ADR: OutputConfig on StartDocumentAnalysis | Writes Textract blocks to S3 so assemble_text
+        # can read them via textractOutputKey; without this assemble_text has no blocks to process
         start_textract = sfn_tasks.CallAwsService(
             self, "StartTextractJob",
             service="textract",
@@ -415,11 +419,15 @@ class PolicyDiffComputeStack(cdk.Stack):
             parameters={
                 "DocumentLocation": {
                     "S3Object": {
-                        "Bucket": sfn.JsonPath.string_at("$.bucketName"),
+                        "Bucket": sfn.JsonPath.string_at("$.s3Bucket"),
                         "Name": sfn.JsonPath.string_at("$.s3Key"),
                     }
                 },
                 "FeatureTypes": ["TABLES", "FORMS"],
+                "OutputConfig": {
+                    "S3Bucket": sfn.JsonPath.string_at("$.s3Bucket"),
+                    "S3Prefix": sfn.JsonPath.format("textract-output/{}", sfn.JsonPath.string_at("$.policyDocId")),
+                },
             },
             result_path="$.textractResult",
             iam_resources=["*"],
@@ -559,14 +567,8 @@ class PolicyDiffComputeStack(cdk.Stack):
             timeout=cdk.Duration.minutes(5),
         )
 
-        # Inject workflow ARN into Lambdas that need to start executions
-        self.policy_crud_fn.add_environment(
-            "EXTRACTION_WORKFLOW_ARN", self.extraction_workflow.state_machine_arn
-        )
-
-        # Grant PolicyCrudLambda permission to start the extraction workflow
-        # ADR: upload_url_fn excluded | Workflow is triggered by EventBridge on S3 ObjectCreated, not by the Lambda
-        self.extraction_workflow.grant_start_execution(self.policy_crud_fn)
+        # ADR: upload_url_fn excluded | Workflow is triggered by EventBridge on S3 ObjectCreated, not by Lambda
+        # policy_crud_fn excluded | EXTRACTION_WORKFLOW_ARN not used in policy_crud handler; EventBridge handles trigger
 
         # ── EventBridge rules ─────────────────────────────────────────────────
 
@@ -586,10 +588,11 @@ class PolicyDiffComputeStack(cdk.Stack):
             targets.SfnStateMachine(
                 self.extraction_workflow,
                 # ADR: EventBridge input transformer | Maps S3 event shape to workflow input shape
+                # s3Bucket (not bucketName) matches what assemble_text/bedrock_extract read from event
                 input=events.RuleTargetInput.from_object({
-                    "bucketName": events.EventField.from_path("$.detail.bucket.name"),
+                    "s3Bucket": events.EventField.from_path("$.detail.bucket.name"),
                     "s3Key": events.EventField.from_path("$.detail.object.key"),
-                    # policyDocId is parsed from key format raw/{policyDocId}.pdf by assemble_text_fn
+                    # policyDocId is parsed from key format raw/{policyDocId}/raw.pdf by assemble_text_fn
                     "policyDocId": events.EventField.from_path("$.detail.object.key"),
                 }),
             )

@@ -351,7 +351,19 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     doc_class: str = event.get("documentClass", "drug_specific")
 
     # ── PDF path: Textract ────────────────────────────────────────────────
+    # ADR: textractOutputKey derived from OutputConfig path | StartDocumentAnalysis writes blocks to
+    # s3Bucket/textract-output/{policyDocId}/{jobId}/ — key passed through SFN state or derived here
     textract_output_key: str = event.get("textractOutputKey", "")
+    if not textract_output_key:
+        # Derive from textractResult.JobId set by StartTextractJob state
+        job_id = (event.get("textractResult") or {}).get("JobId", "")
+        if job_id:
+            textract_output_key = f"textract-output/{policy_doc_id}/{job_id}/1"
+            logger.info(json.dumps({"action": "derived_textract_key", "key": textract_output_key}))
+        else:
+            logger.error(json.dumps({"error": "missing_textract_output_key", "policyDocId": policy_doc_id}))
+            raise ValueError("textractOutputKey not set and textractResult.JobId not found in event")
+
     try:
         resp = s3.get_object(Bucket=s3_bucket, Key=textract_output_key)
         textract_results = json.loads(resp["Body"].read().decode("utf-8"))
