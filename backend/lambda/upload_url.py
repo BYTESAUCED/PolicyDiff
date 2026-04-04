@@ -41,7 +41,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     logger.info(json.dumps({
         "action": "upload_url_request",
         "requestId": (event.get("requestContext") or {}).get("requestId"),
-        "sourceIp": (event.get("requestContext") or {}).get("http", {}).get("sourceIp"),
     }))
 
     bucket_name = os.environ.get("DOCUMENTS_BUCKET_NAME")

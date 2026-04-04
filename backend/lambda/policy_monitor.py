@@ -71,8 +71,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     except ClientError as e:
         logger.error(json.dumps({"error": "s3_client_error", "detail": str(e)}))
-        return {"processed": 0, "error": str(e)}
+        return {"processed": 0, "error": "S3 operation failed"}
 
     except Exception as e:
         logger.error(json.dumps({"error": "unhandled_exception", "detail": str(e)}))
-        return {"processed": 0, "error": str(e)}
+        return {"processed": 0, "error": "Internal error"}

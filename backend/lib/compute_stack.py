@@ -247,7 +247,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         storage_stack.policy_bucket.grant_read(self.embed_index_fn)
         self.embed_index_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=["arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"],
+            resources=[TITAN_EMBED_ARN],
         ))
         self.embed_index_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["s3vectors:PutVectors"],
@@ -260,10 +260,6 @@ class PolicyDiffComputeStack(cdk.Stack):
         ], apply_to_children=True)
 
         # QueryLambda — S3 Vectors semantic search + Titan embeddings for query-time embedding
-        self.query_fn.add_to_role_policy(iam.PolicyStatement(
-            actions=["bedrock:InvokeModel"],
-            resources=["arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"],
-        ))
         self.query_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["s3vectors:QueryVectors"],
             resources=[f"arn:aws:s3vectors:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:bucket/policydiff-vectors-{cdk.Aws.ACCOUNT_ID}-{cdk.Aws.REGION}/index/policy-criteria-index"],

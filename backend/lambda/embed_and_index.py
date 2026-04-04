@@ -162,4 +162,4 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     except Exception as e:
         # ADR: Non-blocking catch | Embedding failures must not fail the extraction pipeline
         logger.warning(json.dumps({"action": "embed_index_error", "policyDocId": policy_doc_id, "reason": str(e)}))
-        return {**event, "vectorsIndexed": 0, "vectorsError": str(e)}
+        return {**event, "vectorsIndexed": 0, "vectorsError": "Embedding operation failed"}
