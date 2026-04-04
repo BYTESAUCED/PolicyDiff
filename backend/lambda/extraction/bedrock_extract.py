@@ -246,6 +246,27 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     structured_key: str = event["structuredTextS3Key"]
     doc_class: str = event.get("documentClass", "drug_specific")
 
+    # Enrich metadata from DynamoDB if missing (direct S3 upload path)
+    payer_name: str = event.get("payerName", "")
+    if not payer_name:
+        try:
+            dynamodb = boto3.resource("dynamodb")
+            table = dynamodb.Table(os.environ.get("POLICY_DOCUMENTS_TABLE", "PolicyDocuments"))
+            result = table.get_item(Key={"policyDocId": policy_doc_id})
+            item = result.get("Item", {})
+            event = {
+                **event,
+                "payerName": item.get("payerName", "Unknown"),
+                "planType": item.get("planType", "Commercial"),
+                "documentTitle": item.get("documentTitle", "Unknown Policy"),
+                "effectiveDate": item.get("effectiveDate", ""),
+            }
+            payer_name = event["payerName"]
+            logger.info(json.dumps({"action": "enriched_from_dynamo", "payerName": payer_name}))
+        except Exception as e:
+            logger.warning(f"Could not enrich metadata from DynamoDB: {e}")
+            payer_name = "Unknown"
+
     # Skip extraction for index-only document classes
     from extraction.prompts import NO_EXTRACTION_CLASSES
     skip_extraction: bool = event.get("skipExtraction", False)
@@ -259,7 +280,6 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
             "extractionSkipped": True,
         }
 
-    payer_name: str = event.get("payerName", "Unknown")
     prompt_id: str = event.get("extractionPromptId", "") or ""
 
     # 1. Load structured text from S3

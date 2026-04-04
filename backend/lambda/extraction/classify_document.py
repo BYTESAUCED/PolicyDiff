@@ -327,6 +327,26 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     s3_key = event.get("s3Key", "")
     policy_number = event.get("policyNumber", "")
 
+    # If metadata missing from event (direct S3 upload without POST /api/policies),
+    # try to enrich from DynamoDB PolicyDocuments record
+    if not payer_name or not document_title:
+        policy_doc_id = event.get("policyDocId", "")
+        if policy_doc_id:
+            try:
+                table = dynamodb.Table(POLICY_DOCUMENTS_TABLE)
+                result = table.get_item(Key={"policyDocId": policy_doc_id})
+                item = result.get("Item", {})
+                payer_name = payer_name or item.get("payerName", "")
+                document_title = document_title or item.get("documentTitle", "")
+                policy_number = policy_number or item.get("policyNumber", "")
+                logger.info(json.dumps({
+                    "action": "enriched_from_dynamo",
+                    "payerName": payer_name,
+                    "documentTitle": document_title,
+                }))
+            except Exception as e:
+                logger.warning(f"Could not enrich metadata from DynamoDB: {e}")
+
     classification = classify_document(payer_name, document_title, s3_key, policy_number)
 
     logger.info(json.dumps({
