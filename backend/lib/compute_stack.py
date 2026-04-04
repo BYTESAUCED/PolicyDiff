@@ -54,6 +54,7 @@ class PolicyDiffComputeStack(cdk.Stack):
             "REGION": cdk.Aws.REGION,
             # Fix 3: BEDROCK_MODEL_ID was missing — all Bedrock Lambdas need this
             "BEDROCK_MODEL_ID": bedrock_model_arn,
+            "CORS_ORIGIN": "*",  # Explicit wildcard; override at deploy time for production
         }
 
         # ── Lambda definitions ────────────────────────────────────────────────
@@ -169,7 +170,7 @@ class PolicyDiffComputeStack(cdk.Stack):
             memory_size=512,
             environment={
                 **common_env,
-                "VECTORS_BUCKET_NAME": storage_stack.vectors_bucket.ref,
+                "VECTORS_BUCKET_NAME": f"policydiff-vectors-{cdk.Aws.REGION}",
                 "TITAN_MODEL_ARN": TITAN_EMBED_ARN,
             },
         )
@@ -283,7 +284,7 @@ class PolicyDiffComputeStack(cdk.Stack):
             actions=["bedrock:InvokeModel"],
             resources=[TITAN_EMBED_ARN],
         ))
-        self.query_fn.add_environment("VECTORS_BUCKET_NAME", storage_stack.vectors_bucket.ref)
+        self.query_fn.add_environment("VECTORS_BUCKET_NAME", f"policydiff-vectors-{cdk.Aws.REGION}")
         self.query_fn.add_environment("TITAN_MODEL_ARN", TITAN_EMBED_ARN)
 
         # CompareLambda
@@ -328,7 +329,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         ))
         self.embed_index_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["s3vectors:PutVectors"],
-            resources=[f"arn:aws:s3vectors:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:bucket/policydiff-vectors-{cdk.Aws.ACCOUNT_ID}-{cdk.Aws.REGION}/index/policy-criteria-index"],
+            resources=[f"arn:aws:s3vectors:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:bucket/policydiff-vectors-{cdk.Aws.REGION}/index/policy-criteria-index"],
         ))
         NagSuppressions.add_resource_suppressions(self.embed_index_fn, [
             {"id": "AwsSolutions-IAM4", "reason": "AWSLambdaBasicExecutionRole is the minimal required managed policy for Lambda CloudWatch logging"},
@@ -339,7 +340,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         # QueryLambda — S3 Vectors semantic search + Titan embeddings for query-time embedding
         self.query_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["s3vectors:QueryVectors"],
-            resources=[f"arn:aws:s3vectors:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:bucket/policydiff-vectors-{cdk.Aws.ACCOUNT_ID}-{cdk.Aws.REGION}/index/policy-criteria-index"],
+            resources=[f"arn:aws:s3vectors:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:bucket/policydiff-vectors-{cdk.Aws.REGION}/index/policy-criteria-index"],
         ))
 
         # ── Extraction pipeline Lambda IAM grants (Fix 1, Fix 5) ─────────────
@@ -410,8 +411,20 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         # ── Step Functions states ─────────────────────────────────────────────
 
+        # ADR: ExtractPolicyDocId Pass state | EventBridge can't split strings; intrinsic fn extracts segment 1
+        extract_policy_doc_id = sfn.Pass(
+            self, "ExtractPolicyDocId",
+            parameters={
+                "s3Bucket.$": "$.s3Bucket",
+                "s3Key.$": "$.s3Key",
+                "policyDocId.$": "States.ArrayGetItem(States.StringSplit($.s3Key, '/'), 1)",
+            },
+        )
+
         # ADR: OutputConfig on StartDocumentAnalysis | Writes Textract blocks to S3 so assemble_text
         # can read them via textractOutputKey; without this assemble_text has no blocks to process
+        # ADR: OutputConfig prefix uses s3Key (not policyDocId) | policyDocId is parsed later by assemble_text;
+        # s3Key format is raw/{policyDocId}/raw.pdf so prefix is deterministic
         start_textract = sfn_tasks.CallAwsService(
             self, "StartTextractJob",
             service="textract",
@@ -426,7 +439,7 @@ class PolicyDiffComputeStack(cdk.Stack):
                 "FeatureTypes": ["TABLES", "FORMS"],
                 "OutputConfig": {
                     "S3Bucket": sfn.JsonPath.string_at("$.s3Bucket"),
-                    "S3Prefix": sfn.JsonPath.format("textract-output/{}", sfn.JsonPath.string_at("$.policyDocId")),
+                    "S3Prefix": "textract-output",
                 },
             },
             result_path="$.textractResult",
@@ -545,7 +558,8 @@ class PolicyDiffComputeStack(cdk.Stack):
         diff_branch = trigger_diff_state.next(execution_complete)
 
         definition = sfn.Chain.start(
-            start_textract
+            extract_policy_doc_id
+            .next(start_textract)
             .next(poll_textract)
             .next(textract_complete)
         )
@@ -557,14 +571,14 @@ class PolicyDiffComputeStack(cdk.Stack):
         write_to_dynamo.next(embed_and_index)
         embed_and_index.next(trigger_diff_state)
 
-        # ADR: Express Workflow | Cost-effective for short-lived executions (<5 min)
+        # ADR: Express Workflow | Cost-effective for short-lived executions; 15 min covers Textract + Bedrock
         self.extraction_workflow = sfn.StateMachine(
             self, "ExtractionWorkflow",
             state_machine_name="PolicyDiffExtractionWorkflow",
             state_machine_type=sfn.StateMachineType.EXPRESS,
             definition_body=sfn.DefinitionBody.from_chainable(definition),
             role=workflow_role,
-            timeout=cdk.Duration.minutes(5),
+            timeout=cdk.Duration.minutes(15),
         )
 
         # ADR: upload_url_fn excluded | Workflow is triggered by EventBridge on S3 ObjectCreated, not by Lambda

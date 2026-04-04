@@ -99,7 +99,7 @@ def _strip_boilerplate(text: str, payer_name: str, doc_class: str) -> tuple[str,
 
     if stripped:
         chars_saved = original_len - len(text)
-        logger.info(f"Stripped {chars_saved} chars of boilerplate for {payer_name}")
+        logger.info(json.dumps({"action": "boilerplate_stripped", "charsSaved": chars_saved, "payerName": payer_name}))
 
     return text, stripped
 
@@ -177,7 +177,7 @@ def _split_by_indication(text: str, payer_name: str) -> list[dict] | None:
     # Extract preamble (preferred products, ICD-10 mapping, overview) to include with each chunk
     preamble = _extract_preamble(text, payer_name)
 
-    logger.info(f"Split document into {len(chunks)} indication chunks")
+    logger.info(json.dumps({"action": "document_split", "chunkCount": len(chunks)}))
     return [{"indicationText": chunk, "preamble": preamble} for chunk in chunks]
 
 
@@ -362,13 +362,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # ── PDF path: Textract ────────────────────────────────────────────────
     # ADR: textractOutputKey derived from OutputConfig path | StartDocumentAnalysis writes blocks to
-    # s3Bucket/textract-output/{policyDocId}/{jobId}/ — key passed through SFN state or derived here
+    # s3Bucket/textract-output/{jobId}/ — static prefix used since policyDocId not available at Textract start
     textract_output_key: str = event.get("textractOutputKey", "")
     if not textract_output_key:
         # Derive from textractResult.JobId set by StartTextractJob state
         job_id = (event.get("textractResult") or {}).get("JobId", "")
         if job_id:
-            textract_output_key = f"textract-output/{policy_doc_id}/{job_id}/1"
+            textract_output_key = f"textract-output/{job_id}/1"
             logger.info(json.dumps({"action": "derived_textract_key", "key": textract_output_key}))
         else:
             logger.error(json.dumps({"error": "missing_textract_output_key", "policyDocId": policy_doc_id}))
@@ -378,7 +378,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         resp = s3.get_object(Bucket=s3_bucket, Key=textract_output_key)
         textract_results = json.loads(resp["Body"].read().decode("utf-8"))
     except Exception as exc:
-        logger.error(f"Failed to read Textract output: {exc}")
+        logger.error(json.dumps({"error": "textract_read_failed", "detail": str(exc)}))
         raise
 
     if isinstance(textract_results, list):
@@ -389,7 +389,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         all_blocks = textract_results.get("Blocks", [])
 
     page_count = len({b.get("Page", 1) for b in all_blocks})
-    logger.info(f"Textract returned {len(all_blocks)} blocks across {page_count} pages")
+    logger.info(json.dumps({"action": "textract_blocks_loaded", "blockCount": len(all_blocks), "pageCount": page_count}))
 
     raw_text = _extract_text_from_blocks(all_blocks)
     tables = _extract_tables_from_blocks(all_blocks)
@@ -428,7 +428,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         Body=json.dumps(structured_doc, default=str),
         ContentType="application/json",
     )
-    logger.info(f"Wrote structured text to s3://{s3_bucket}/{structured_key}")
+    logger.info(json.dumps({"action": "structured_text_written", "s3Key": structured_key}))
 
     # ── Update PolicyDocuments with boilerplate flag ──────────────────────
     if boilerplate_stripped:
@@ -441,7 +441,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 ExpressionAttributeValues={":b": True},
             )
         except Exception as e:
-            logger.warning(f"Failed to update boilerplate flag: {e}")
+            logger.warning(json.dumps({"warning": "boilerplate_flag_update_failed", "detail": str(e)}))
 
     return {
         **event,

@@ -19,7 +19,7 @@ class PolicyDiffStorageStack(cdk.Stack):
         self.policy_bucket = s3.Bucket(
             self,
             "DocumentsBucket",
-            bucket_name=f"policydiff-documents-{cdk.Aws.ACCOUNT_ID}-{cdk.Aws.REGION}",
+            bucket_name=f"policydiff-docs-{cdk.Aws.REGION}",
             versioned=True,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             encryption=s3.BucketEncryption.S3_MANAGED,
@@ -168,14 +168,16 @@ class PolicyDiffStorageStack(cdk.Stack):
         )
 
         # ADR: S3 Vectors L1 construct | aws_s3vectors L2 not yet available; CfnVectorBucket is the only option
+        vectors_bucket_name = f"policydiff-vectors-{cdk.Aws.REGION}"
         self.vectors_bucket = s3vectors.CfnVectorBucket(
             self, "VectorsBucket",
-            vector_bucket_name=f"policydiff-vectors-{cdk.Aws.ACCOUNT_ID}-{cdk.Aws.REGION}",
+            vector_bucket_name=vectors_bucket_name,
         )
 
+        # ADR: Use explicit bucket name string for CfnIndex | .ref resolves to ARN (89 chars), exceeds 63-char limit
         self.vectors_index = s3vectors.CfnIndex(
             self, "PolicyCriteriaIndex",
-            vector_bucket_name=self.vectors_bucket.ref,
+            vector_bucket_name=vectors_bucket_name,
             index_name="policy-criteria-index",
             data_type="float32",
             dimension=1536,
@@ -194,7 +196,7 @@ class PolicyDiffStorageStack(cdk.Stack):
         # CloudFormation exports
         cdk.CfnOutput(self, "DocumentsBucketArn", value=self.policy_bucket.bucket_arn, export_name="DocumentsBucketArn")
         cdk.CfnOutput(self, "DocumentsBucketName", value=self.policy_bucket.bucket_name, export_name="DocumentsBucketName")
-        cdk.CfnOutput(self, "VectorsBucketName", value=self.vectors_bucket.ref, export_name="VectorsBucketName")
+        cdk.CfnOutput(self, "VectorsBucketName", value=vectors_bucket_name, export_name="VectorsBucketName")
 
         cdk.CfnOutput(self, "PolicyDocumentsTableName", value=self.policy_documents_table.table_name, export_name="PolicyDocumentsTableName")
         cdk.CfnOutput(self, "PolicyDocumentsTableArn", value=self.policy_documents_table.table_arn, export_name="PolicyDocumentsTableArn")

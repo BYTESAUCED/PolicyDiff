@@ -192,8 +192,45 @@ def handle_create_policy(event: dict) -> dict:
         if previous_version_id:
             item["previousVersionId"] = previous_version_id
 
-    table.put_item(Item=item)
-    logger.info(json.dumps({"action": "policy_created", "policyDocId": item["policyDocId"]}))
+    try:
+        table.put_item(
+            Item=item,
+            ConditionExpression="attribute_not_exists(policyDocId) OR extractionStatus = :pending",
+            ExpressionAttributeValues={":pending": "pending"},
+        )
+        logger.info(json.dumps({"action": "policy_created", "policyDocId": item["policyDocId"]}))
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            raise
+        # Extraction already in progress or complete — only update metadata fields
+        update_expr_parts = [
+            "payerName = :payer",
+            "planType = :plan",
+            "documentTitle = :title",
+            "effectiveDate = :date",
+            "updatedAt = :updated",
+        ]
+        expr_values = {
+            ":payer": item["payerName"],
+            ":plan": item["planType"],
+            ":title": item["documentTitle"],
+            ":date": item["effectiveDate"],
+            ":updated": datetime.now(timezone.utc).isoformat(),
+        }
+        for opt_field, expr_key in [("s3Key", ":s3key"), ("version", ":ver"), ("drugName", ":drug")]:
+            if item.get(opt_field):
+                update_expr_parts.append(f"{opt_field} = {expr_key}")
+                expr_values[expr_key] = item[opt_field]
+        if item.get("previousVersionId"):
+            update_expr_parts.append("previousVersionId = :prev")
+            expr_values[":prev"] = item["previousVersionId"]
+
+        table.update_item(
+            Key={"policyDocId": item["policyDocId"]},
+            UpdateExpression="SET " + ", ".join(update_expr_parts),
+            ExpressionAttributeValues=expr_values,
+        )
+        logger.info(json.dumps({"action": "policy_metadata_updated_safe", "policyDocId": item["policyDocId"]}))
     return create_response(201, item)
 
 
@@ -298,6 +335,11 @@ def handle_list_policies(event: dict) -> dict:
         result = table.scan(**scan_kwargs)
 
     response_body: dict = {"items": result.get("Items", [])}
+    # Filter out soft-deleted records
+    response_body["items"] = [
+        i for i in response_body["items"]
+        if i.get("extractionStatus") != "deleted"
+    ]
     # Apply drugName client-side filter (PolicyDocuments doesn't have a drugName GSI)
     if drug_name:
         response_body["items"] = [

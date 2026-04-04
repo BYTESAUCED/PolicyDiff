@@ -30,6 +30,10 @@ DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "")
 POLICY_DIFFS_TABLE = os.environ.get("POLICY_DIFFS_TABLE", "")
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
 
+for _var in ["DRUG_POLICY_CRITERIA_TABLE", "POLICY_DIFFS_TABLE", "BEDROCK_MODEL_ID"]:
+    if not os.environ.get(_var):
+        logger.warning(json.dumps({"warning": "missing_env_var", "var": _var}))
+
 dynamodb = boto3.resource("dynamodb")
 bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 
@@ -140,6 +144,7 @@ def _find_discordant_pairs() -> list[dict]:
     """Scan DrugPolicyCriteria for drug+payer combos with both medical & pharmacy."""
     table = dynamodb.Table(DRUG_POLICY_CRITERIA_TABLE)
 
+    # ADR: Scan limit 500 | Acceptable for hackathon scope; production should use GSI on benefitType
     result = table.scan(Limit=500)
     items = result.get("Items", [])
 
@@ -214,6 +219,10 @@ def list_discordances() -> dict:
 
 def get_discordance_detail(drug: str, payer: str) -> dict:
     """GET /api/discordance/{drug}/{payer} — full discordance analysis."""
+    if not drug or not payer:
+        return _response(400, {"error": "drug and payer path parameters are required"})
+    if len(drug) > 200 or len(payer) > 200:
+        return _response(400, {"error": "path parameters too long"})
     table = dynamodb.Table(DRUG_POLICY_CRITERIA_TABLE)
 
     # Fetch all criteria for this drug + payer
@@ -249,7 +258,7 @@ def get_discordance_detail(drug: str, payer: str) -> dict:
         cleaned = _clean_json(raw)
         analysis = json.loads(cleaned)
     except Exception as e:
-        logger.error(f"Bedrock discordance analysis failed: {e}")
+        logger.error(json.dumps({"error": "bedrock_discordance_failed", "detail": str(e)}))
         return _response(500, {"error": "Discordance analysis failed"})
 
     # Store result in PolicyDiffs table
@@ -271,7 +280,7 @@ def get_discordance_detail(drug: str, payer: str) -> dict:
     try:
         diffs_table.put_item(Item=diff_record)
     except Exception as e:
-        logger.warning(f"Failed to store discordance result: {e}")
+        logger.warning(json.dumps({"warning": "discordance_store_failed", "detail": str(e)}))
 
     return _response(200, {
         "diffId": diff_id,
@@ -317,5 +326,5 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _response(404, {"error": "Not found"})
 
     except Exception as e:
-        logger.exception(f"Unhandled error: {e}")
+        logger.error(json.dumps({"error": "unhandled_exception", "detail": str(e)}))
         return _response(500, {"error": "Internal server error"})

@@ -21,6 +21,8 @@ logger.setLevel(logging.INFO)
 
 POLICY_DOCUMENTS_TABLE = os.environ.get("POLICY_DOCUMENTS_TABLE", "PolicyDocuments")
 DIFF_FUNCTION_NAME = os.environ.get("DIFF_FUNCTION_NAME", "")
+if not DIFF_FUNCTION_NAME:
+    logger.warning(json.dumps({"warning": "missing_env_var", "var": "DIFF_FUNCTION_NAME"}))
 
 dynamodb = boto3.resource("dynamodb")
 lambda_client = boto3.client("lambda")
@@ -38,20 +40,20 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     item = result.get("Item")
 
     if not item:
-        logger.warning(f"Policy {policy_doc_id} not found in DynamoDB")
+        logger.warning(json.dumps({"warning": "policy_not_found", "policyDocId": policy_doc_id}))
         return {**event, "diffTriggered": False}
 
     previous_version_id = item.get("previousVersionId")
 
     if not previous_version_id:
-        logger.info(f"No previousVersionId for policy {policy_doc_id} — skipping diff")
+        logger.info(json.dumps({"action": "no_previous_version", "policyDocId": policy_doc_id}))
         return {**event, "diffTriggered": False}
 
     # 2. Verify previous version exists
     prev_result = table.get_item(Key={"policyDocId": previous_version_id})
     prev_item = prev_result.get("Item")
     if not prev_item:
-        logger.warning(f"Previous version {previous_version_id} not found — skipping diff")
+        logger.warning(json.dumps({"warning": "previous_version_not_found", "previousVersionId": previous_version_id}))
         return {**event, "diffTriggered": False}
 
     # 3. Asynchronously invoke DiffLambda
@@ -75,9 +77,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             InvocationType="Event",  # async — fire and forget
             Payload=json.dumps(diff_payload).encode("utf-8"),
         )
-        logger.info(f"Triggered diff: {previous_version_id} → {policy_doc_id}")
+        logger.info(json.dumps({"action": "diff_triggered", "oldPolicyDocId": previous_version_id, "newPolicyDocId": policy_doc_id}))
     except Exception as e:
-        logger.error(f"Failed to invoke DiffLambda: {e}")
+        logger.error(json.dumps({"error": "diff_invoke_failed", "detail": str(e)}))
         # Non-fatal — the extraction pipeline still succeeded
         return {**event, "diffTriggered": False, "diffError": str(e)}
 

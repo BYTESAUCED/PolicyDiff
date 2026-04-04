@@ -47,7 +47,7 @@ def _batch_write_criteria(criteria: list[dict]) -> int:
         for record in criteria:
             # Ensure required keys exist
             if not record.get("policyDocId") or not record.get("drugIndicationId"):
-                logger.warning(f"Skipping record missing required keys: {record.get('drugName', '?')}")
+                logger.warning(json.dumps({"warning": "skipping_record_missing_keys", "drugName": record.get("drugName", "unknown")}))
                 continue
 
             # Add extraction timestamp
@@ -63,7 +63,7 @@ def _batch_write_criteria(criteria: list[dict]) -> int:
                 batch.put_item(Item=item)
                 written += 1
             except Exception as e:
-                logger.error(f"Failed to write record {record.get('drugIndicationId')}: {e}")
+                logger.error(json.dumps({"error": "record_write_failed", "drugIndicationId": record.get("drugIndicationId"), "detail": str(e)}))
 
     return written
 
@@ -101,7 +101,7 @@ def _update_policy_status(
                 },
                 ConditionExpression="attribute_not_exists(policyDocId)",
             )
-            logger.info(f"Created stub PolicyDocuments record for {policy_doc_id} (race condition guard)")
+            logger.info(json.dumps({"action": "stub_record_created", "policyDocId": policy_doc_id}))
         except Exception:
             pass  # Record already exists — that's fine, proceed to update
 
@@ -126,9 +126,9 @@ def _update_policy_status(
             UpdateExpression=update_expr,
             ExpressionAttributeValues=expr_values,
         )
-        logger.info(f"Updated policy {policy_doc_id} status to '{status}'")
+        logger.info(json.dumps({"action": "policy_status_updated", "policyDocId": policy_doc_id, "status": status}))
     except Exception as e:
-        logger.error(f"Failed to update policy status: {e}")
+        logger.error(json.dumps({"error": "policy_status_update_failed", "detail": str(e)}))
         raise
 
 
@@ -141,7 +141,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     confidence_summary: dict = event.get("confidenceSummary", {})
 
     if not criteria:
-        logger.warning(f"No criteria to write for policy {policy_doc_id}")
+        logger.warning(json.dumps({"warning": "no_criteria_to_write", "policyDocId": policy_doc_id}))
         _update_policy_status(policy_doc_id, "complete", 0, confidence_summary, event)
         return {
             **event,
@@ -151,7 +151,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # 1. Batch write criteria records
     records_written = _batch_write_criteria(criteria)
-    logger.info(f"Wrote {records_written}/{len(criteria)} criteria records to DynamoDB")
+    logger.info(json.dumps({"action": "criteria_written", "written": records_written, "total": len(criteria)}))
 
     # 2. Update policy document status
     review_count = confidence_summary.get("reviewCount", 0)

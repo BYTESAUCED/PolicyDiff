@@ -28,7 +28,11 @@ logger.setLevel(logging.INFO)
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "*")
 POLICY_DIFFS_TABLE = os.environ.get("POLICY_DIFFS_TABLE", "PolicyDiffs")
 DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "DrugPolicyCriteria")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-5-20250514")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
+
+for _var in ["POLICY_DIFFS_TABLE", "DRUG_POLICY_CRITERIA_TABLE", "BEDROCK_MODEL_ID"]:
+    if not os.environ.get(_var):
+        logger.warning(json.dumps({"warning": "missing_env_var", "var": _var}))
 
 dynamodb = boto3.resource("dynamodb")
 bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
@@ -94,8 +98,11 @@ def _clean_json(text: str) -> str:
 
 def compute_temporal_diff(event: dict) -> dict:
     """Generate a temporal diff between two policy versions using Bedrock."""
-    policy_doc_id_old = event["policyDocIdOld"]
-    policy_doc_id_new = event["policyDocIdNew"]
+    policy_doc_id_old = event.get("policyDocIdOld", "")
+    policy_doc_id_new = event.get("policyDocIdNew", "")
+    if not policy_doc_id_old or not policy_doc_id_new:
+        logger.error(json.dumps({"error": "missing_required_fields", "fields": ["policyDocIdOld", "policyDocIdNew"]}))
+        return {"diffId": None, "changes": [], "error": "missing required fields"}
     drug_name = event.get("drugName", "")
     payer_name = event.get("payerName", "")
     old_date = event.get("oldDate", "")
@@ -135,7 +142,7 @@ def compute_temporal_diff(event: dict) -> dict:
         cleaned = _clean_json(response_text)
         diff_result = json.loads(cleaned)
     except Exception as e:
-        logger.error(f"Bedrock diff invocation failed: {e}")
+        logger.error(json.dumps({"error": "bedrock_diff_failed", "detail": str(e)}))
         diff_result = {"changes": []}
 
     changes = diff_result.get("changes", [])
@@ -161,7 +168,7 @@ def compute_temporal_diff(event: dict) -> dict:
         diff_record["indicationName"] = changes[0].get("indication", "")
 
     diffs_table.put_item(Item=diff_record)
-    logger.info(f"Wrote temporal diff {diff_id} with {len(changes)} changes")
+    logger.info(json.dumps({"action": "temporal_diff_written", "diffId": diff_id, "changesCount": len(changes)}))
 
     return {"diffId": diff_id, "changesCount": len(changes)}
 
@@ -292,5 +299,5 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _response(404, {"error": "Not found"})
 
     except Exception as e:
-        logger.exception(f"Unhandled error: {e}")
-        return _response(500, {"error": "Internal server error", "detail": str(e)})
+        logger.error(json.dumps({"error": "unhandled_exception", "detail": str(e)}))
+        return _response(500, {"error": "Internal server error"})

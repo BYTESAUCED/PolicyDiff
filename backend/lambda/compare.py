@@ -23,7 +23,11 @@ logger.setLevel(logging.INFO)
 
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "*")
 DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "DrugPolicyCriteria")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-5-20250514")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
+
+for _var in ["DRUG_POLICY_CRITERIA_TABLE", "BEDROCK_MODEL_ID"]:
+    if not os.environ.get(_var):
+        logger.warning(json.dumps({"warning": "missing_env_var", "var": _var}))
 
 dynamodb = boto3.resource("dynamodb")
 bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
@@ -151,6 +155,11 @@ def compare_matrix(params: dict) -> dict:
     if not drug:
         return _response(400, {"error": "drug query parameter is required"})
 
+    if len(drug) > 200:
+        return _response(400, {"error": "drug parameter too long"})
+    if indication and len(indication) > 500:
+        return _response(400, {"error": "indication parameter too long"})
+
     # 1. Fetch criteria from DynamoDB
     criteria = _fetch_criteria_for_drug(drug, payers)
 
@@ -196,7 +205,7 @@ def compare_matrix(params: dict) -> dict:
         cleaned = _clean_json(raw)
         matrix = json.loads(cleaned)
     except Exception as e:
-        logger.error(f"Bedrock comparison failed: {e}")
+        logger.error(json.dumps({"error": "bedrock_comparison_failed", "detail": str(e)}))
         # Fallback: return raw data without AI analysis
         matrix = {
             "drug": drug,
@@ -276,5 +285,5 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _response(404, {"error": "Not found"})
 
     except Exception as e:
-        logger.exception(f"Unhandled error: {e}")
-        return _response(500, {"error": "Internal server error", "detail": str(e)})
+        logger.error(json.dumps({"error": "unhandled_exception", "detail": str(e)}))
+        return _response(500, {"error": "Internal server error"})
