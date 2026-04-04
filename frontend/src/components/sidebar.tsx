@@ -7,16 +7,17 @@ import {
     LayoutDashboard, UploadCloud, Search, TableProperties, Activity, MessageSquare, AlertTriangle, FileCheck, PanelLeftClose, PanelRightClose, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ModeToggle } from "./mode-toggle";
 
 const routes = [
-    { label: "Dashboard", href: "/", icon: LayoutDashboard, color: "text-sky-500" },
-    { label: "Policy Upload", href: "/upload", icon: UploadCloud, color: "text-violet-500" },
-    { label: "Drug Explorer", href: "/explorer", icon: Search, color: "text-pink-700" },
-    { label: "Comparison Matrix", href: "/compare", icon: TableProperties, color: "text-orange-700" },
-    { label: "Change Feed", href: "/diffs", icon: Activity, color: "text-emerald-500" },
-    { label: "Query Interface", href: "/query", icon: MessageSquare, color: "text-blue-700" },
-    { label: "Discordance Alerts", href: "/discordance", icon: AlertTriangle, color: "text-red-700" },
-    { label: "Approval Path", href: "/approval-path", icon: FileCheck, color: "text-green-700" },
+    { label: "Dashboard", href: "/", icon: LayoutDashboard },
+    { label: "Policy Upload", href: "/upload", icon: UploadCloud },
+    { label: "Drug Explorer", href: "/explorer", icon: Search },
+    { label: "Comparison Matrix", href: "/compare", icon: TableProperties },
+    { label: "Change Feed", href: "/diffs", icon: Activity },
+    { label: "Query Interface", href: "/query", icon: MessageSquare },
+    { label: "Discordance Alerts", href: "/discordance", icon: AlertTriangle },
+    { label: "Approval Path", href: "/approval-path", icon: FileCheck },
 ];
 
 export function AppSidebar() {
@@ -57,12 +58,12 @@ export function AppSidebar() {
                             className={cn(
                                 "flex items-center rounded-md transition-colors px-3 h-10 shrink-0 group relative cursor-pointer",
                                 isActive
-                                    ? "bg-white/10 text-white"
-                                    : "text-muted-text hover:bg-white/5 hover:text-white",
+                                    ? "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary-foreground"
+                                    : "text-muted-text hover:bg-sidebar-accent hover:text-sidebar-foreground",
                                 isCollapsed ? "justify-center px-0 w-10 mx-auto" : "w-full"
                             )}
                         >
-                            <route.icon className={cn("h-5 w-5 shrink-0 transition-transform group-hover:scale-110", route.color)} />
+                            <route.icon className={cn("h-5 w-5 shrink-0 transition-transform group-hover:scale-[1.03]", isActive ? "text-primary dark:text-primary-foreground" : "text-muted-text opacity-70 group-hover:opacity-100")} />
                             {!isCollapsed && (
                                 <span className="ml-3 text-sm font-medium truncate">{route.label}</span>
                             )}
@@ -71,6 +72,9 @@ export function AppSidebar() {
                 })}
             </div>
 
+            <div className="p-3 mt-auto flex flex-col gap-2 shrink-0 border-t border-border">
+                <ModeToggle isCollapsed={isCollapsed} />
+            </div>
         </aside>
     );
 }

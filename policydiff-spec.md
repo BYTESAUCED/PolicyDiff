@@ -1039,16 +1039,28 @@ Return JSON only:
 ### 11.2 Screen Specifications
 
 #### Screen 1: Dashboard
-**Owner:** Om
-
-Displays on initial load. Shows:
+*isplays on initial load. Shows:
 - Stats row: Total policies ingested | Drugs tracked | Payers covered | Changes detected this quarter
+- **Personalized "Your Watched Drugs" section** — reads `watched_drugs` from the Auth0 JWT claims (`https://policydiff.com/watched_drugs`). If the user has watched drugs set, shows a filtered change feed: "Here are the latest policy changes for infliximab, adalimumab." Each card links directly to the relevant diff or comparison. If no watched drugs are set, shows a prompt: "Watch drugs to get personalized updates → Settings."
 - "What changed this quarter?" summary card — top 3 most severe diffs, red badge for breaking changes
 - Recent activity feed (last 5 uploads + extractions)
-- Quick action: "Upload new policy" button → navigates to Upload screen
+- Quick action: "Upload new policy" button → navigates to Upload screen (admin role only — hide for consultant role)
 - Quick action: "Run comparison" → navigates to Comparison Matrix
 
----
+**Auth0 JWT claims available on the frontend (injected by Auth0 Action):**
+- `https://policydiff.com/role` — `"admin"` or `"consultant"`
+- `https://policydiff.com/watched_drugs` — array of drug names e.g. `["infliximab", "adalimumab"]`
+- `https://policydiff.com/watched_payers` — array of payer names e.g. `["UnitedHealthcare", "Aetna"]`
+
+**Role-based UI behavior:**
+- `admin` role: sees Upload button, can delete policies, sees full admin controls
+- `consultant` role: read-only, no upload/delete, sees personalized watched-drug dashboard
+
+**Watched drugs management:** Add a "Settings" or gear icon on the dashboard that opens a modal/drawer where the user can add/remove drugs and payers from their watch list. This calls `PUT /api/users/me/preferences` and the next login will re-inject the updated list into the JWT via the Auth0 Action.
+
+**How watched_drugs gets into the JWT:**
+An Auth0 Action runs on every login. It reads the user's `UserPreferences` record from DynamoDB (via the backend API or direct AWS SDK call) and injects `watched_drugs`, `watched_payers`, and `role` as custom claims. The frontend reads these directly from the decoded JWT — no extra API call needed on page load.
+
 
 #### Screen 2: Policy Upload
 **Owner:** Dominic
