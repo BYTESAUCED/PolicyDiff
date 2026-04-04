@@ -133,7 +133,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-7">
-                <Card className="col-span-4">
+                <Card className="col-span-4 bg-transparent border-border">
                     <CardHeader>
                         <CardTitle>What changed this quarter?</CardTitle>
                     </CardHeader>
@@ -141,7 +141,7 @@ export default function DashboardPage() {
                         {recentChanges.map((change, i) => (
                             <div
                                 key={i}
-                                className="flex items-start gap-4 p-4 rounded-lg border border-border/50 bg-white/5 hover:bg-white/10 transition"
+                                className="flex items-start gap-4 p-4 rounded-lg border border-border bg-transparent hover:bg-white/5 transition"
                             >
                                 <Badge
                                     variant={change.severity === "breaking" ? "destructive" : change.severity === "restrictive" ? "warning" : "success"}
@@ -170,7 +170,7 @@ export default function DashboardPage() {
                     </CardContent>
                 </Card>
 
-                <Card className="col-span-3">
+                <Card className="col-span-3 bg-transparent border-border">
                     <CardHeader>
                         <CardTitle>Recent Activity</CardTitle>
                     </CardHeader>
