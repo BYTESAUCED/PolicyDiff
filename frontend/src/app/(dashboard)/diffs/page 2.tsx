@@ -106,13 +106,13 @@ export default function ChangeFeedPage() {
                                 </p>
 
                                 <div className="pt-2">
-                                    <Button variant="link" className="p-0 h-auto text-primary" onClick={() => toggle(item.id)}>
+                                    <Button variant="link" className="p-0 h-auto text-sky-500" onClick={() => toggle(item.id)}>
                                         {expanded.includes(item.id) ? "Hide technical diff" : "View technical diff"}
                                     </Button>
                                 </div>
 
                                 {expanded.includes(item.id) && (
-                                    <div className="mt-4 overflow-hidden rounded-md border border-border bg-card shadow-sm">
+                                    <div className="mt-4 border border-border bg-background rounded-md overflow-hidden">
                                         <div className="flex items-center p-2 bg-card border-b border-border text-xs text-muted-text gap-2">
                                             <FileText className="h-3 w-3" />
                                             <span>{item.oldVersion.date}</span>

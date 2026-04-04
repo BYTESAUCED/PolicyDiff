@@ -106,7 +106,7 @@ export default function QueryInterfacePage() {
 
                     {/* Large centered input — Gemini style */}
                     <div className="w-full max-w-2xl">
-                        <div className="relative rounded-3xl border border-border bg-card px-5 pt-4 pb-3 shadow-xl transition-colors focus-within:border-ring">
+                        <div className="relative rounded-3xl border border-border bg-card px-5 pt-4 pb-3 shadow-xl transition-colors focus-within:border-ring dark:border-white/10 dark:bg-[#1a1a1a] dark:focus-within:border-white/20">
                             <Textarea
                                 ref={textareaRef}
                                 placeholder="Ask PolicyDiff..."
@@ -134,7 +134,7 @@ export default function QueryInterfacePage() {
                                 <button
                                     key={i}
                                     onClick={() => handleQuery(sq)}
-                                    className="rounded-full border border-border bg-card px-4 py-1.5 text-[13px] text-muted-foreground transition-all hover:border-ring/40 hover:bg-muted hover:text-foreground"
+                                    className="rounded-full border border-border bg-card px-4 py-1.5 text-[13px] text-muted-foreground transition-all hover:border-ring/40 hover:bg-muted hover:text-foreground dark:border-white/10 dark:bg-[#1a1a1a] dark:hover:border-white/20"
                                 >
                                     {sq}
                                 </button>
@@ -152,7 +152,7 @@ export default function QueryInterfacePage() {
                             <div key={i}>
                                 {msg.role === "user" ? (
                                     <div className="flex justify-end">
-                                        <div className="max-w-[80%] rounded-3xl rounded-tr-md border border-border bg-card px-5 py-3 text-sm leading-relaxed text-foreground shadow-sm">
+                                        <div className="max-w-[80%] rounded-3xl rounded-tr-md border border-border bg-card px-5 py-3 text-sm leading-relaxed text-foreground dark:border-white/8 dark:bg-[#1a1a1a]">
                                             {msg.content}
                                         </div>
                                     </div>
@@ -177,9 +177,9 @@ export default function QueryInterfacePage() {
                                             </div>
 
                                             {/* Citations accordion */}
-                                            <div className="overflow-hidden rounded-2xl border border-border bg-card text-sm shadow-sm">
+                                            <div className="overflow-hidden rounded-2xl border border-border text-sm dark:border-white/8">
                                                 <button
-                                                    className="flex w-full items-center justify-between px-4 py-3 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                                                    className="flex w-full items-center justify-between px-4 py-3 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground dark:hover:bg-white/[0.03]"
                                                     onClick={() => setCitationsOpen(!citationsOpen)}
                                                 >
                                                     <div className="flex items-center gap-2">
@@ -189,14 +189,14 @@ export default function QueryInterfacePage() {
                                                     <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${citationsOpen ? "rotate-180" : ""}`} />
                                                 </button>
                                                 {citationsOpen && (
-                                                    <div className="divide-y divide-border border-t border-border">
+                                                    <div className="divide-y divide-border border-t border-border dark:divide-white/8 dark:border-white/8">
                                                         {citations.map((c, ci) => (
                                                             <div key={ci} className="px-4 py-3 space-y-2">
                                                                 <div className="flex items-center gap-2">
-                                                                    <span className="rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60">{c.payer}</span>
+                                                                    <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60 dark:border-white/10">{c.payer}</span>
                                                                     <span className="text-xs text-foreground/70 font-medium">{c.doc}</span>
                                                                 </div>
-                                                                <div className="flex gap-2 border-l border-border pl-3 text-xs text-muted-foreground">
+                                                                <div className="flex gap-2 border-l border-border pl-3 text-xs text-muted-foreground dark:border-white/10">
                                                                     <Quote className="h-3 w-3 shrink-0 mt-0.5 opacity-50" />
                                                                     <p className="italic leading-relaxed">{c.quote}</p>
                                                                 </div>
@@ -242,7 +242,7 @@ export default function QueryInterfacePage() {
             {!isEmpty && (
                 <div className="shrink-0 px-6 py-4">
                     <div className="max-w-2xl mx-auto">
-                        <div className="relative rounded-3xl border border-border bg-card px-5 pt-4 pb-3 shadow-sm transition-colors focus-within:border-ring">
+                        <div className="relative rounded-3xl border border-border bg-card px-5 pt-4 pb-3 transition-colors focus-within:border-ring dark:border-white/10 dark:bg-[#1a1a1a] dark:focus-within:border-white/20">
                             <Textarea
                                 placeholder="Ask a follow-up..."
                                 className="min-h-[24px] max-h-[160px] w-full resize-none border-0 bg-transparent p-0 text-sm text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0 focus-visible:ring-offset-0"
