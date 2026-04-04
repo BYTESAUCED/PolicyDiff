@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { QueryProvider } from "@/components/query-provider";
+import { UserProvider } from "@auth0/nextjs-auth0/client";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -26,9 +27,11 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full">
       <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans h-full bg-background text-primary-text antialiased`}>
-        <QueryProvider>
-          {children}
-        </QueryProvider>
+        <UserProvider>
+          <QueryProvider>
+            {children}
+          </QueryProvider>
+        </UserProvider>
       </body>
     </html>
   );

@@ -7,6 +7,8 @@ import {
     LayoutDashboard, UploadCloud, Search, TableProperties, Activity, MessageSquare, AlertTriangle, FileCheck, PanelLeftClose, PanelRightClose, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
+import { LogIn, LogOut } from "lucide-react";
 
 const routes = [
     { label: "Dashboard", href: "/", icon: LayoutDashboard, color: "text-sky-500" },
@@ -22,6 +24,7 @@ const routes = [
 export function AppSidebar() {
     const pathname = usePathname();
     const [isCollapsed, setIsCollapsed] = useState(false);
+    const { user, isAuthenticated, isLoading, login, logout } = useAuth();
 
     return (
         <aside
@@ -70,6 +73,40 @@ export function AppSidebar() {
                     );
                 })}
             </div>
+
+            {/* Auth section */}
+            {!isLoading && (
+                <div className={cn("border-t border-border px-3 py-3 shrink-0", isCollapsed ? "flex justify-center" : "")}>
+                    {isAuthenticated ? (
+                        <div className={cn("flex items-center gap-2", isCollapsed ? "flex-col" : "")}>
+                            {!isCollapsed && (
+                                <span className="text-xs text-muted-text truncate flex-1" title={user?.email ?? ""}>
+                                    {user?.email}
+                                </span>
+                            )}
+                            <button
+                                onClick={logout}
+                                title="Log out"
+                                className="flex items-center justify-center rounded-md p-1.5 text-muted-text hover:text-white hover:bg-white/5 transition-colors cursor-pointer shrink-0"
+                            >
+                                <LogOut className="h-4 w-4" />
+                            </button>
+                        </div>
+                    ) : (
+                        <button
+                            onClick={login}
+                            title="Log in"
+                            className={cn(
+                                "flex items-center rounded-md px-3 h-9 text-sm font-medium text-muted-text hover:text-white hover:bg-white/5 transition-colors cursor-pointer w-full",
+                                isCollapsed ? "justify-center px-0 w-10 mx-auto" : ""
+                            )}
+                        >
+                            <LogIn className="h-4 w-4 shrink-0" />
+                            {!isCollapsed && <span className="ml-2">Log in</span>}
+                        </button>
+                    )}
+                </div>
+            )}
 
         </aside>
     );
