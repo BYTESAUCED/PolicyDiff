@@ -47,8 +47,8 @@ PolicyDiff is a four-layer system:
 
 | Member | Role | Primary Ownership |
 |---|---|---|
-| **Atharva (AZ)** | Backend + Cloud Infrastructure | CDK stack, S3, DynamoDB, Step Functions, API Gateway, Lambda CRUD, ingestion pipeline wiring |
-| **Mohith** | AI/ML Core | Bedrock prompts, extraction engine, query classifier, diff engine, Approval Path Generator logic, Gemini integration |
+| **Mohith** | AI/ML Core | Bedrock prompts, extraction engine, query classifier, diff engine, Approval Path Generator logic, S3 Vectors write (write_criteria.py), vector-based query retrieval (query.py) |
+| **Atharva (AZ)** | Backend + Cloud Infrastructure | CDK stack, S3, DynamoDB, S3 Vectors bucket + index (StorageStack), Step Functions, API Gateway, Lambda CRUD, ingestion pipeline wiring |
 | **Om** | Frontend Lead | All 8 screens, comparison matrix component, query interface, change feed, design system |
 | **Dominic** | Frontend Support | PDF upload component, drug explorer, discordance alerts view, API integration wiring on frontend |
 
@@ -61,12 +61,11 @@ PolicyDiff is a four-layer system:
 - **IaC:** AWS CDK v2 (Python)
 - **API:** API Gateway REST + Lambda (per-route functions)
 - **Orchestration:** AWS Step Functions (Express Workflows)
-- **Storage:** S3 (raw PDFs, Textract output), DynamoDB (all structured data)
+- **Storage:** S3 (raw PDFs, Textract output), DynamoDB (all structured data), S3 Vectors (semantic search index for query interface)
 - **OCR:** AWS Textract (TABLES + FORMS mode)
-- **AI — Primary:** AWS Bedrock, Claude Sonnet (us-east-1)
-- **AI — Gemini Track:** Google Gemini 1.5 Pro via REST API (called from Lambda, key stored in AWS Secrets Manager)
-- **Hosting:** AWS Amplify (React app)
-- **Region:** us-east-1
+- **AI — Primary:** AWS Bedrock, Claude Sonnet `anthropic.claude-sonnet-4-5` (us-east-1)
+- **AI — Embeddings:** AWS Bedrock, Titan Embeddings v2 `amazon.titan-embed-text-v2:0` (us-east-1) — used for S3 Vectors indexing
+- **Hosting:** AWS Amplify (React app, connected manually via console)
 
 ### Frontend
 - React 18 + Vite
@@ -316,17 +315,34 @@ User types a plain English question. System classifies query type, retrieves rel
 6. "Does Aetna's medical policy for rituximab differ from their pharmacy policy?" → discordance check
 
 **Backend flow:**
-1. `POST /api/query` with `{ queryText, sessionId? }`
+1. `POST /api/query` with `{ queryText }`
 2. Bedrock classifies query type: `coverage_check | criteria_lookup | cross_payer_compare | change_tracking | discordance_check`
-3. Based on type, construct DynamoDB queries:
-   - `coverage_check` → query `drugName-payerName-index` across all payers
-   - `criteria_lookup` → query specific payer + drug + indication
-   - `cross_payer_compare` → fetch same drug from multiple payers, pass to Bedrock comparison prompt
-   - `change_tracking` → query `PolicyDiffs` table for drug/payer
-   - `discordance_check` → query `PolicyDiffs` where `diffType = "benefit_discordance"`
-4. Retrieved data + original question → Bedrock synthesis prompt (Section 10.2)
-5. Response includes: `{ queryType, answer, citations: [{payer, documentTitle, effectiveDate, excerpt, confidence}] }`
+3. **Retrieval — two paths based on query type:**
+   - **Structured queries** (`criteria_lookup`, `change_tracking`, `discordance_check`): query DynamoDB directly by exact payer + drug + indication — you know exactly what you need
+   - **Open-ended semantic queries** (`coverage_check`, `cross_payer_compare`): embed the query text via Titan Embeddings v2 → query S3 Vectors index → retrieve top-5 most semantically relevant `rawExcerpt` chunks with metadata (payer, drug, indication, effectiveDate) — ~3k tokens instead of 40k
+4. Retrieved excerpts/records + original question → Bedrock Claude synthesis prompt
+5. Response includes: `{ queryType, answer, citations: [{payer, documentTitle, effectiveDate, excerpt}] }`
 6. Write to QueryLog table
+
+**Token impact:** Open-ended queries drop from ~20-40k tokens (full criteria JSON for all matching records) to ~3k tokens (top-5 relevant excerpts from S3 Vectors).
+
+**S3 Vectors index:** `policy-criteria-index` inside bucket `policydiff-vectors-{account}-{region}`. Each vector entry:
+```json
+{
+  "key": "{policyDocId}#{drugIndicationId}",
+  "data": { "float32": [/* 1536-dim Titan embedding of rawExcerpt */] },
+  "metadata": {
+    "policyDocId": "...",
+    "drugName": "infliximab",
+    "indicationName": "rheumatoid arthritis",
+    "payerName": "UnitedHealthcare",
+    "effectiveDate": "2026-02-01",
+    "benefitType": "medical",
+    "rawExcerpt": "Patient must have failed at least one biosimilar..."
+  }
+}
+```
+Vectors are written during extraction (Step 6 — `write_criteria.py`) immediately after DynamoDB write.
 
 **API endpoints:**
 ```
@@ -1052,15 +1068,20 @@ This is the primary demo screen. Must be visually undeniable.
 # - Lifecycle rule: transition to S3-IA after 30 days
 # - Block all public access
 
+# S3 Vectors bucket: policydiff-vectors-{account}-{region}  [AZ]
+# - Vector index: policy-criteria-index
+# - Dimension: 1536 (Titan Embeddings v2)
+# - Distance metric: cosine
+# - IAM: s3vectors:PutVectors for write_criteria Lambda
+#         s3vectors:QueryVectors for QueryLambda
+
 # DynamoDB tables (all with PAY_PER_REQUEST billing):
 # - PolicyDocuments (PK: policyDocId)
 # - DrugPolicyCriteria (PK: policyDocId, SK: drugIndicationId) + 2 GSIs
 # - PolicyDiffs (PK: diffId) + 1 GSI
 # - QueryLog (PK: queryId)
 # - ApprovalPaths (PK: approvalPathId)
-
-# Secrets Manager:
-# - policydiff/gemini-api-key
+# - UserPreferences (PK: userId) — Auth0 sub claim, stores watched drugs/payers
 ```
 
 #### `PolicyDiffComputeStack`
