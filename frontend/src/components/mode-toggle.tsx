@@ -13,7 +13,7 @@ export function ModeToggle({ isCollapsed }: { isCollapsed?: boolean }) {
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
       className={cn(
         "flex items-center rounded-md transition-colors px-3 h-10 group relative cursor-pointer",
-        "text-muted-text hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        "text-muted-text hover:bg-muted hover:text-foreground",
         isCollapsed ? "justify-center px-0 w-10 mx-auto" : "w-full"
       )}
       title="Toggle theme"
