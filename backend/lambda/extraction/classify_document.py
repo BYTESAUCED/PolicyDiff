@@ -351,6 +351,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "payerName": payer_name,
                     "documentTitle": document_title,
                 }))
+                # ADR: merge enriched fields back into event | assemble_text + bedrock_extract need payerName
+                event = {
+                    **event,
+                    "payerName": payer_name,
+                    "documentTitle": document_title,
+                    "policyNumber": policy_number,
+                }
             except Exception as e:
                 logger.warning(f"Could not enrich metadata from DynamoDB: {e}")
 
