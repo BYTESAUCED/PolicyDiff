@@ -2,7 +2,7 @@
 
 **PolicyDiff turns payer PDF policies into structured, searchable, comparable data — so pharmacy consultants stop reading 200-page documents by hand.**
 
-Upload a medical benefit drug policy PDF from UnitedHealthcare, Aetna, Cigna, or any other payer. PolicyDiff extracts every prior authorization criterion, step therapy requirement, biosimilar preference, and dosing limit — then lets you compare them side by side, track what changed between versions, and ask plain-English questions like *"Which plans cover infliximab for Crohn's disease and what do they require?"*
+Upload a medical benefit drug policy PDF from UnitedHealthcare, Aetna, Cigna, or any other payer. PolicyDiff extracts every prior authorization criterion, step therapy requirement, biosimilar preference, and dosing limit — then lets you compare them side by side, track what changed between versions, and ask plain-English questions like *"Which plans cover infliximab for Crohn's disease and what do they require?"* and make Approval Path for a payer in seconds given a patient's treatment history.
 
 Built for specialty pharmacy consultants and market access teams at companies like Anton RX.
 
