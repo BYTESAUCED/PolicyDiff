@@ -10,7 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
-import { useDiffsFeed, usePolicies, useUserPreferences } from "@/hooks/use-api";
+import { useDiffsFeed, usePolicies, useUserPreferences, useRecentQueries } from "@/hooks/use-api";
 
 // ── Search data ───────────────────────────────────────────────────────────────
 
@@ -69,6 +69,7 @@ export default function DashboardPage() {
     const { data: feedData, isLoading: loadingFeed } = useDiffsFeed(5);
     const { data: policiesData, isLoading: loadingPolicies } = usePolicies({ limit: 50 });
     const { data: prefsData } = useUserPreferences();
+    const { data: queriesData, isLoading: loadingQueries } = useRecentQueries(5);
 
     const loading = loadingFeed || loadingPolicies;
 
@@ -383,9 +384,41 @@ export default function DashboardPage() {
                             </Button>
                         </Link>
                     </div>
-                    <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-                        No queries yet. Ask a question to get started.
-                    </div>
+                    {loadingQueries ? (
+                        <div className="space-y-3">
+                            {[0, 1, 2].map(i => (
+                                <div key={i} className="px-4 py-3 border border-border rounded-lg space-y-2">
+                                    <Skeleton className="h-4 w-3/4" />
+                                    <Skeleton className="h-3 w-24" />
+                                </div>
+                            ))}
+                        </div>
+                    ) : !queriesData?.queries?.length ? (
+                        <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+                            No queries yet. Ask a question to get started.
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {queriesData.queries.slice(0, 5).map((q) => (
+                                <Link
+                                    key={q.queryId}
+                                    href="/query"
+                                    className="block group px-4 py-3 rounded-lg border border-border hover:bg-muted/20 transition-colors cursor-pointer"
+                                >
+                                    <p className="text-sm text-foreground group-hover:text-primary transition-colors line-clamp-1">{q.queryText}</p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <span className="text-[10px] font-mono text-muted-foreground/60">{q.queryType}</span>
+                                        {q.createdAt && (
+                                            <>
+                                                <span className="text-muted-foreground/30 text-[10px]">·</span>
+                                                <span className="text-[10px] text-muted-foreground/60">{relativeTime(q.createdAt)}</span>
+                                            </>
+                                        )}
+                                    </div>
+                                </Link>
+                            ))}
+                        </div>
+                    )}
                 </section>
             </div>
         </div>

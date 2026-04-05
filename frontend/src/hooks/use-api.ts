@@ -124,6 +124,27 @@ export interface ApprovalPathResult {
 
 // ── Queries ──────────────────────────────────────��───────────────────────────
 
+export interface RecentQuery {
+  queryId: string;
+  queryText: string;
+  queryType: string;
+  createdAt: string;
+}
+
+export function useRecentQueries(limit = 5) {
+  return useQuery({
+    queryKey: ["recent-queries", limit],
+    queryFn: () =>
+      apiFetch<{ queries: RecentQuery[] }>(
+        "api/queries",
+        undefined,
+        { limit }
+      ),
+    retry: shouldRetry,
+    staleTime: 30_000,
+  });
+}
+
 export function usePolicies(params?: {
   payerName?: string;
   drugName?: string;
