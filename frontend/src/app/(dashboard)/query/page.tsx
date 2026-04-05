@@ -65,7 +65,7 @@ export default function QueryInterfacePage() {
     // Load recent queries for suggested chips
     const loadRecentQueries = useCallback(async () => {
         try {
-            const data = await apiFetch<{ queries: RecentQuery[] }>("/api/queries");
+            const data = await apiFetch<{ queries: RecentQuery[] }>("api/queries");
             setRecentQueries(data.queries ?? []);
         } catch {
             // Non-critical — silently ignore
@@ -85,8 +85,7 @@ export default function QueryInterfacePage() {
         setIsResponding(true);
 
         try {
-            // ADR: POST /api/query returns answer synchronously | backend calls Bedrock inline
-            const result = await apiFetch<QueryResponse>("/api/query", {
+            const result = await apiFetch<QueryResponse>("api/query", {
                 method: "POST",
                 body: JSON.stringify({ queryText: text }),
             });
@@ -98,7 +97,6 @@ export default function QueryInterfacePage() {
                 dataCompleteness: result.dataCompleteness,
             }]);
 
-            // Refresh recent queries list after successful query
             loadRecentQueries();
         } catch (e) {
             const msg = e instanceof ApiError ? e.message : "Query failed. Please try again.";
@@ -118,9 +116,6 @@ export default function QueryInterfacePage() {
     const toggleCitations = (idx: number) => {
         setCitationsOpen(prev => ({ ...prev, [idx]: !prev[idx] }));
     };
-
-    // Show recent query texts as chips if no suggested queries match
-    const chips = suggestedQueries;
 
     return (
         <div className="flex flex-col h-full relative">
@@ -172,7 +167,7 @@ export default function QueryInterfacePage() {
                         </div>
 
                         <div className="flex flex-wrap justify-center gap-2 mt-5">
-                            {chips.map((sq, i) => (
+                            {suggestedQueries.map((sq, i) => (
                                 <button
                                     key={i}
                                     onClick={() => handleQuery(sq)}
@@ -236,7 +231,6 @@ export default function QueryInterfacePage() {
                                                 </p>
                                             )}
 
-                                            {/* Citations accordion */}
                                             {msg.citations && msg.citations.length > 0 && (
                                                 <div className="overflow-hidden rounded-2xl border border-border text-sm dark:border-white/8">
                                                     <button
@@ -278,7 +272,6 @@ export default function QueryInterfacePage() {
                             </div>
                         ))}
 
-                        {/* Typing indicator */}
                         {isResponding && (
                             <div className="flex gap-3">
                                 <div className="shrink-0 mt-1">

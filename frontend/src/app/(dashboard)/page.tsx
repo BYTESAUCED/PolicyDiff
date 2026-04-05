@@ -5,42 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
     Search, ArrowRight, BookMarked, TableProperties,
-    Clock, ChevronRight, Pill, FileText, Calendar
+    Pill, FileText, Calendar
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { useState, useRef, useEffect, useCallback } from "react";
-import { apiFetch, ApiError } from "@/lib/api";
+import { useState, useRef, useEffect } from "react";
+import { useDiffsFeed, usePolicies, useUserPreferences, useRecentQueries } from "@/hooks/use-api";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface WatchedDrug {
-    name: string;
-    generic?: string;
-    payers?: string[];
-    updatedPayers?: number;
-    lastUpdate?: string;
-}
-
-interface FeedEntry {
-    diffId: string;
-    drugName: string;
-    payerName: string;
-    severity: string;
-    humanSummary: string;
-    generatedAt: string;
-    field?: string;
-    indication?: string;
-}
-
-interface RecentQuery {
-    queryId: string;
-    queryText: string;
-    queryType: string;
-    createdAt: string;
-}
-
-// ── Search data (static drug list for autocomplete) ───────────────────────────
+// ── Search data ───────────────────────────────────────────────────────────────
 
 const allDrugs = [
     { name: "Infliximab",    brands: "Remicade, Inflectra, Avsola",    payers: 6 },
@@ -92,17 +64,53 @@ const watchedDrugBlockClasses = [
 ];
 
 // ── Page ─────────────────────────────────────────────────────────────────────
+
 export default function DashboardPage() {
+    const { data: feedData, isLoading: loadingFeed } = useDiffsFeed(5);
+    const { data: policiesData, isLoading: loadingPolicies } = usePolicies({ limit: 50 });
+    const { data: prefsData } = useUserPreferences();
+    const { data: queriesData, isLoading: loadingQueries } = useRecentQueries(5);
+
+    const loading = loadingFeed || loadingPolicies;
+
+    // Live feed data
+    const recentChanges = feedData?.feed ?? [];
+
+    // Derive stats
+    const trackingCount = policiesData?.items?.length
+        ? new Set(policiesData.items.map((p) => p.drugName).filter(Boolean)).size
+        : 0;
+    const changesThisWeek = recentChanges.filter(c => {
+        if (!c.generatedAt) return false;
+        return Date.now() - new Date(c.generatedAt).getTime() < 7 * 24 * 60 * 60 * 1000;
+    }).length;
+    const actionableAlerts = recentChanges.filter(c => c.severity === "breaking").length;
+
+    // Watched drugs from preferences or derive from policies
+    const watchedDrugs = prefsData?.watchedDrugs?.length
+        ? prefsData.watchedDrugs.map((name: string) => ({ name, payers: [] as string[], updatedPayers: 0, lastUpdate: "" }))
+        : policiesData?.items?.length
+            ? (() => {
+                const grouped = new Map<string, { payers: Set<string>; latest: string }>();
+                policiesData.items.forEach(p => {
+                    if (!p.drugName) return;
+                    if (!grouped.has(p.drugName)) grouped.set(p.drugName, { payers: new Set(), latest: "" });
+                    const g = grouped.get(p.drugName)!;
+                    if (p.payerName) g.payers.add(p.payerName);
+                    if (p.effectiveDate && p.effectiveDate > g.latest) g.latest = p.effectiveDate;
+                });
+                return Array.from(grouped.entries()).slice(0, 3).map(([name, data]) => ({
+                    name,
+                    payers: Array.from(data.payers),
+                    updatedPayers: 0,
+                    lastUpdate: data.latest ? relativeTime(data.latest) : "",
+                }));
+            })()
+            : [];
+
     const [query, setQuery] = useState("");
     const [open, setOpen] = useState(false);
     const searchRef = useRef<HTMLDivElement>(null);
-
-    const [watchedDrugs, setWatchedDrugs] = useState<WatchedDrug[]>([]);
-    const [recentChanges, setRecentChanges] = useState<FeedEntry[]>([]);
-    const [recentQueries, setRecentQueries] = useState<RecentQuery[]>([]);
-    const [totalPolicies, setTotalPolicies] = useState<number | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
 
     const results = query.trim()
         ? allDrugs
@@ -111,44 +119,6 @@ export default function DashboardPage() {
             .sort((a, b) => b.score - a.score)
             .map(({ drug }) => drug)
         : [];
-
-    const fetchDashboardData = useCallback(async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            const [prefsData, feedData, queriesData, policiesData] = await Promise.allSettled([
-                apiFetch<{ watchedDrugs?: WatchedDrug[] }>("/api/users/me/preferences"),
-                apiFetch<{ feed: FeedEntry[] }>("/api/diffs/feed", undefined, { limit: "5" }),
-                apiFetch<{ queries: RecentQuery[] }>("/api/queries"),
-                apiFetch<{ items: unknown[] }>("/api/policies"),
-            ]);
-
-            if (prefsData.status === "fulfilled") {
-                const drugs = prefsData.value.watchedDrugs ?? [];
-                setWatchedDrugs(drugs);
-            }
-
-            if (feedData.status === "fulfilled") {
-                setRecentChanges(feedData.value.feed ?? []);
-            }
-
-            if (queriesData.status === "fulfilled") {
-                setRecentQueries(queriesData.value.queries ?? []);
-            }
-
-            if (policiesData.status === "fulfilled") {
-                setTotalPolicies(policiesData.value.items?.length ?? 0);
-            }
-        } catch (e) {
-            setError(e instanceof ApiError ? e.message : "Failed to load dashboard data");
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchDashboardData();
-    }, [fetchDashboardData]);
 
     useEffect(() => {
         function handleClick(e: MouseEvent) {
@@ -159,14 +129,6 @@ export default function DashboardPage() {
         document.addEventListener("mousedown", handleClick);
         return () => document.removeEventListener("mousedown", handleClick);
     }, []);
-
-    // Derive stats from real data
-    const drugsTracked = watchedDrugs.length || totalPolicies || 0;
-    const changesThisWeek = recentChanges.filter(c => {
-        if (!c.generatedAt) return false;
-        return Date.now() - new Date(c.generatedAt).getTime() < 7 * 24 * 60 * 60 * 1000;
-    }).length;
-    const actionableAlerts = recentChanges.filter(c => c.severity === "breaking").length;
 
     return (
         <div className="p-8 space-y-10 max-w-6xl">
@@ -179,7 +141,7 @@ export default function DashboardPage() {
                             Welcome back.
                         </h1>
                         <p className="text-lg text-muted-foreground">
-                            Here's what changed in <span className="italic text-[#cd6c55] font-serif">medical drug policies</span> today.
+                            Here&apos;s what changed in <span className="italic text-[#cd6c55] font-serif">medical drug policies</span> today.
                         </p>
                     </div>
                     <div className="shrink-0 md:pt-2">
@@ -196,7 +158,7 @@ export default function DashboardPage() {
                         <span className="text-muted-foreground">Tracking</span>
                         {loading
                             ? <Skeleton className="h-4 w-8" />
-                            : <span className="font-semibold text-foreground">{drugsTracked} drugs</span>
+                            : <span className="font-semibold text-foreground">{trackingCount} drugs</span>
                         }
                     </div>
                     <div className="w-[1px] h-3.5 bg-border dark:bg-white/10" />
@@ -264,13 +226,6 @@ export default function DashboardPage() {
                 </div>
             </div>
 
-            {/* ── Error state ── */}
-            {error && (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                    {error}
-                </div>
-            )}
-
             {/* ── Watched Drugs ── */}
             <section className="space-y-5">
                 <div className="flex items-center justify-between">
@@ -303,7 +258,7 @@ export default function DashboardPage() {
                     </div>
                 ) : watchedDrugs.length === 0 ? (
                     <div className="rounded-lg border border-dashed border-border px-6 py-8 text-center text-sm text-muted-foreground">
-                        No watched drugs yet. Your preferences will appear here once configured.
+                        No watched drugs yet. Upload policies to see tracked drugs here.
                     </div>
                 ) : (
                     <div className="grid grid-cols-3 border border-border dark:border-white/10 rounded-lg divide-x divide-border dark:divide-white/10 bg-transparent">
@@ -328,7 +283,7 @@ export default function DashboardPage() {
                                             </span>
                                         )}
                                     </div>
-                                    {drug.payers && drug.payers.length > 0 && (
+                                    {drug.payers.length > 0 && (
                                         <div className="flex flex-wrap gap-1.5">
                                             {drug.payers.map((payer) => (
                                                 <span key={payer} className="text-[11px] font-mono px-2 py-0.5 rounded border border-border dark:border-white/10 text-muted-foreground bg-transparent">
@@ -429,32 +384,36 @@ export default function DashboardPage() {
                             </Button>
                         </Link>
                     </div>
-                    {loading ? (
-                        <div className="rounded-lg border border-border dark:border-white/10 divide-y divide-border dark:divide-white/10">
+                    {loadingQueries ? (
+                        <div className="space-y-3">
                             {[0, 1, 2].map(i => (
-                                <div key={i} className="px-4 py-4 space-y-2">
-                                    <Skeleton className="h-4 w-32" />
+                                <div key={i} className="px-4 py-3 border border-border rounded-lg space-y-2">
+                                    <Skeleton className="h-4 w-3/4" />
                                     <Skeleton className="h-3 w-24" />
                                 </div>
                             ))}
                         </div>
-                    ) : recentQueries.length === 0 ? (
+                    ) : !queriesData?.queries?.length ? (
                         <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
                             No queries yet. Ask a question to get started.
                         </div>
                     ) : (
-                        <div className="rounded-lg border border-border dark:border-white/10 divide-y divide-border dark:divide-white/10 bg-transparent">
-                            {recentQueries.slice(0, 3).map((q) => (
-                                <Link key={q.queryId} href="/query" className="block group cursor-pointer bg-card hover:bg-muted/20 transition-colors first:rounded-t-lg last:rounded-b-lg">
-                                    <div className="px-4 py-4">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <p className="text-sm font-medium group-hover:text-primary transition-colors line-clamp-1">{q.queryText}</p>
-                                            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                                        </div>
-                                        <div className="flex items-center gap-1.5 mt-2">
-                                            <Clock className="h-3 w-3 text-muted-foreground/50" />
-                                            <p className="text-[11px] text-muted-foreground/70">{relativeTime(q.createdAt)}</p>
-                                        </div>
+                        <div className="space-y-2">
+                            {queriesData.queries.slice(0, 5).map((q) => (
+                                <Link
+                                    key={q.queryId}
+                                    href="/query"
+                                    className="block group px-4 py-3 rounded-lg border border-border hover:bg-muted/20 transition-colors cursor-pointer"
+                                >
+                                    <p className="text-sm text-foreground group-hover:text-primary transition-colors line-clamp-1">{q.queryText}</p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <span className="text-[10px] font-mono text-muted-foreground/60">{q.queryType}</span>
+                                        {q.createdAt && (
+                                            <>
+                                                <span className="text-muted-foreground/30 text-[10px]">·</span>
+                                                <span className="text-[10px] text-muted-foreground/60">{relativeTime(q.createdAt)}</span>
+                                            </>
+                                        )}
                                     </div>
                                 </Link>
                             ))}

@@ -94,8 +94,8 @@ const Navbar = () => {
                     </div>
                 </div>
                 <div className="flex items-center gap-4">
-                    <Button variant="tertiary" className="text-sm py-2 px-4" href="/api/auth/login?returnTo=/">Sign In</Button>
-                    <Button variant="primary" className="text-sm py-2 px-6" href="/api/auth/login?screen_hint=signup&returnTo=/">Get Started</Button>
+                    <Button variant="tertiary" className="text-sm py-2 px-4" href="/auth/login?returnTo=/">Sign In</Button>
+                    <Button variant="primary" className="text-sm py-2 px-6" href="/auth/login?screen_hint=signup&returnTo=/">Get Started</Button>
                 </div>
             </div>
         </nav>
@@ -151,7 +151,7 @@ export default function App() {
                         transition={{ delay: 0.2 }}
                         className="flex flex-col sm:flex-row items-center justify-center gap-6"
                     >
-                        <Button variant="secondary" href="/api/auth/login?returnTo=/">See the Demo</Button>
+                        <Button variant="secondary" href="/auth/login?returnTo=/">See the Demo</Button>
                         <Button
                             variant="tertiary"
                             onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}
@@ -273,7 +273,7 @@ export default function App() {
                             <p className="text-xl text-charcoal/60 leading-relaxed mb-10">
                                 Input a patient profile and see exactly which payers will approve the therapy—and what clinical evidence is required to secure the prior authorization.
                             </p>
-                            <Button variant="primary" className="bg-[#4d261a]" href="/api/auth/login?returnTo=/approval-path">Explore Clinical Paths</Button>
+                            <Button variant="primary" className="bg-[#4d261a]" href="/auth/login?returnTo=/approval-path">Explore Clinical Paths</Button>
                         </div>
                     </div>
 

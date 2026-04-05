@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Filter, Search, ArrowRight, AlertCircle, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDiscordances } from "@/hooks/use-api";
 import {
     Table,
     TableBody,
@@ -13,27 +14,7 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
-import { apiFetch, ApiError } from "@/lib/api";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface DiscordanceSummary {
-    diffId?: string;
-    drugName: string;
-    payerName: string;
-    discordanceScore?: number | null;
-    summary: string;
-    changesCount?: number;
-    generatedAt?: string;
-    status?: string;
-}
-
-interface DiscordanceResponse {
-    items: DiscordanceSummary[];
-    count: number;
-}
-
-// Map discordance score to severity label
 function scoreSeverity(score: number | null | undefined): { label: string; cls: string } {
     if (score == null) return { label: "Pending", cls: "text-muted-foreground" };
     if (score >= 0.7) return { label: "High", cls: "text-red-400" };
@@ -43,26 +24,9 @@ function scoreSeverity(score: number | null | undefined): { label: string; cls: 
 
 export default function DiscordancePage() {
     const [searchQuery, setSearchQuery] = useState("");
-    const [discordances, setDiscordances] = useState<DiscordanceSummary[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const { data: discordanceData, isLoading, error, refetch } = useDiscordances();
 
-    const fetchDiscordances = useCallback(async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            const data = await apiFetch<DiscordanceResponse>("/api/discordance");
-            setDiscordances(data.items ?? []);
-        } catch (e) {
-            setError(e instanceof ApiError ? e.message : "Failed to load discordance alerts");
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchDiscordances();
-    }, [fetchDiscordances]);
+    const discordances = discordanceData?.items ?? [];
 
     const filtered = discordances.filter(
         (d) =>
@@ -76,7 +40,7 @@ export default function DiscordancePage() {
             <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                     <h2 className="text-2xl font-bold tracking-tight">Discordance Alerts</h2>
-                    {!loading && (
+                    {!isLoading && (
                         <span className="text-xs font-mono text-destructive border border-destructive/30 rounded px-2 py-0.5">
                             {filtered.length} conflict{filtered.length !== 1 ? "s" : ""}
                         </span>
@@ -92,8 +56,8 @@ export default function DiscordancePage() {
                             onChange={(e) => setSearchQuery(e.target.value)}
                         />
                     </div>
-                    <Button variant="outline" size="icon" className="shrink-0" onClick={fetchDiscordances} disabled={loading}>
-                        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Filter className="h-4 w-4" />}
+                    <Button variant="outline" size="icon" className="shrink-0" onClick={() => refetch()} disabled={isLoading}>
+                        {isLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Filter className="h-4 w-4" />}
                     </Button>
                 </div>
             </div>
@@ -101,7 +65,7 @@ export default function DiscordancePage() {
             {error && (
                 <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
                     <AlertCircle className="h-4 w-4 shrink-0" />
-                    {error}
+                    {error instanceof Error ? error.message : "Failed to load discordance alerts"}
                 </div>
             )}
 
@@ -119,7 +83,7 @@ export default function DiscordancePage() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {loading ? (
+                        {isLoading ? (
                             Array.from({ length: 4 }).map((_, i) => (
                                 <TableRow key={i} className="border-border">
                                     <TableCell className="h-12 px-5"><Skeleton className="h-4 w-24" /></TableCell>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import {
     CheckCircle2, FileSignature, AlertTriangle, AlertCircle,
     Loader2, Sparkles, Copy, Check
 } from "lucide-react";
-import { apiFetch, ApiError } from "@/lib/api";
+import { useScoreApprovalPath, useGenerateMemo } from "@/hooks/use-api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -19,28 +19,6 @@ interface PriorTrial {
     drug: string;
     weeks: number;
     outcome: string;
-}
-
-interface PayerScore {
-    payerName: string;
-    score: number;
-    status: string;
-    gaps: string[];
-    meetsCriteria: boolean;
-    policyTitle: string;
-    effectiveDate: string;
-}
-
-interface ApprovalPathResponse {
-    approvalPathId: string;
-    payerScores: PayerScore[];
-    recommendedPayer: string | null;
-}
-
-interface MemoResponse {
-    memoText: string;
-    policyTitle: string;
-    effectiveDate: string;
 }
 
 type StatusColor = "success" | "warning" | "destructive";
@@ -73,17 +51,20 @@ export default function ApprovalPathPage() {
     ]);
 
     // Results state
-    const [generating, setGenerating] = useState(false);
-    const [payerScores, setPayerScores] = useState<PayerScore[]>([]);
-    const [approvalPathId, setApprovalPathId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const evaluated = payerScores.length > 0;
+    const [approvalPathId, setApprovalPathId] = useState<string | null>(null);
+    const [payerScores, setPayerScores] = useState<{ payerName: string; score: number; status: string; gaps: string[]; meetsCriteria: boolean }[]>([]);
 
     // Memo state
     const [memoLoading, setMemoLoading] = useState<Record<string, boolean>>({});
-    const [memos, setMemos] = useState<Record<string, MemoResponse>>({});
+    const [memos, setMemos] = useState<Record<string, { memoText: string; policyTitle: string; effectiveDate: string }>>({});
     const [openMemo, setOpenMemo] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
+
+    const scoreMutation = useScoreApprovalPath();
+    const memoMutation = useGenerateMemo();
+    const generating = scoreMutation.isPending;
+    const evaluated = payerScores.length > 0;
 
     const addTrial = () => setTrials(prev => [...prev, { drug: "", weeks: 12, outcome: "Inadequate Response" }]);
     const updateTrial = (i: number, field: keyof PriorTrial, value: string | number) => {
@@ -91,59 +72,58 @@ export default function ApprovalPathPage() {
     };
     const removeTrial = (i: number) => setTrials(prev => prev.filter((_, idx) => idx !== i));
 
-    const handleGenerate = async () => {
-        setGenerating(true);
+    const handleGenerate = () => {
         setError(null);
         setPayerScores([]);
         setApprovalPathId(null);
         setMemos({});
         setOpenMemo(null);
 
-        try {
-            const result = await apiFetch<ApprovalPathResponse>("/api/approval-path", {
-                method: "POST",
-                body: JSON.stringify({
-                    drugName: drug.toLowerCase(),
-                    indicationName: indication,
-                    icd10Code: icd10,
-                    patientProfile: {
-                        patientAge: null,
-                        priorDrugsTried: trials.map(t => ({
-                            drugName: t.drug,
-                            durationWeeks: t.weeks,
-                            outcome: t.outcome,
-                        })),
-                        prescriberSpecialty,
-                        diagnosisDocumented,
-                        diseaseActivityScore: highDiseaseActivity ? "high" : "moderate",
-                    },
-                }),
-            });
-
-            setPayerScores(result.payerScores ?? []);
-            setApprovalPathId(result.approvalPathId);
-        } catch (e) {
-            setError(e instanceof ApiError ? e.message : "Evaluation failed. Please try again.");
-        } finally {
-            setGenerating(false);
-        }
+        scoreMutation.mutate(
+            {
+                drugName: drug.toLowerCase(),
+                indicationName: indication,
+                icd10Code: icd10,
+                patientProfile: {
+                    priorDrugsTried: trials.map(t => ({
+                        drugName: t.drug,
+                        durationWeeks: t.weeks,
+                        outcome: t.outcome,
+                    })),
+                    prescriberSpecialty,
+                    diagnosisDocumented,
+                    diseaseActivityScore: highDiseaseActivity ? "high" : "moderate",
+                },
+            },
+            {
+                onSuccess: (data) => {
+                    setApprovalPathId(data.approvalPathId);
+                    setPayerScores(data.payerScores ?? []);
+                },
+                onError: (err) => {
+                    setError(err instanceof Error ? err.message : "Evaluation failed. Please try again.");
+                },
+            }
+        );
     };
 
-    const handleGenerateMemo = async (payerName: string) => {
+    const handleGenerateMemo = (payerName: string) => {
         if (!approvalPathId) return;
         setMemoLoading(prev => ({ ...prev, [payerName]: true }));
-        try {
-            const memo = await apiFetch<MemoResponse>(`/api/approval-path/${approvalPathId}/memo`, {
-                method: "POST",
-                body: JSON.stringify({ payerName }),
-            });
-            setMemos(prev => ({ ...prev, [payerName]: memo }));
-            setOpenMemo(payerName);
-        } catch (e) {
-            setError(e instanceof ApiError ? e.message : "Memo generation failed");
-        } finally {
-            setMemoLoading(prev => ({ ...prev, [payerName]: false }));
-        }
+        memoMutation.mutate(
+            { approvalPathId, payerName },
+            {
+                onSuccess: (data) => {
+                    setMemos(prev => ({ ...prev, [payerName]: data }));
+                    setOpenMemo(payerName);
+                    setMemoLoading(prev => ({ ...prev, [payerName]: false }));
+                },
+                onError: (err) => {
+                    setError(err instanceof Error ? err.message : "Memo generation failed");
+                    setMemoLoading(prev => ({ ...prev, [payerName]: false }));
+                },
+            }
+        );
     };
 
     const handleCopy = (text: string) => {
@@ -293,7 +273,7 @@ export default function ApprovalPathPage() {
                         </div>
                     </div>
 
-                    {/* Evaluate button */}
+                    {/* Evaluate button — pinned */}
                     <div className="px-6 py-4 border-t border-border shrink-0">
                         <Button className="w-full font-semibold" onClick={handleGenerate} disabled={generating}>
                             {generating
@@ -337,9 +317,7 @@ export default function ApprovalPathPage() {
                                 <Sparkles className="h-5 w-5 text-muted-text" />
                             </div>
                             <p className="font-medium text-foreground/70">No evaluation yet</p>
-                            <p className="text-sm text-muted-text max-w-xs">
-                                Fill in the patient profile and click <span className="text-foreground/80 font-medium">Evaluate Profile</span> to score coverage likelihood across payers.
-                            </p>
+                            <p className="text-sm text-muted-text max-w-xs">Fill in the patient profile and click <span className="text-foreground/80 font-medium">Evaluate Profile</span> to score coverage likelihood across payers.</p>
                         </div>
                     ) : (
                         <div className="p-6 space-y-6">

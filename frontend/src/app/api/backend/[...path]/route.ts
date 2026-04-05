@@ -37,23 +37,20 @@ async function handleProxy(
     );
   }
 
-  const session = await auth0.getSession();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  let token: string;
+  // Attach Auth0 Bearer token if a session exists.
+  // Falls back to forwarding without auth for unauthenticated APIs (dev mode).
+  let token: string | null = null;
   try {
-    const tokenResult = await auth0.getAccessToken();
-    token = tokenResult.token;
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error: "Failed to obtain access token",
-        detail: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 401 }
-    );
+    const session = await auth0.getSession();
+    if (session) {
+      const audience = process.env.AUTH0_AUDIENCE || undefined;
+      const tokenResult = await auth0.getAccessToken(
+        audience ? { audience } : undefined
+      );
+      token = tokenResult.token;
+    }
+  } catch {
+    // Token unavailable — continue without auth header
   }
 
   const { path } = await params;
@@ -67,7 +64,9 @@ async function handleProxy(
   if (accept) {
     headers.set("accept", accept);
   }
-  headers.set("authorization", `Bearer ${token}`);
+  if (token) {
+    headers.set("authorization", `Bearer ${token}`);
+  }
 
   const init: RequestInit = {
     method: request.method,
@@ -78,8 +77,17 @@ async function handleProxy(
     init.body = await request.arrayBuffer();
   }
 
-  const upstreamResponse = await fetch(buildTargetUrl(request, path), init);
+  const targetUrl = buildTargetUrl(request, path);
+  const upstreamResponse = await fetch(targetUrl, init);
   const body = await upstreamResponse.arrayBuffer();
+
+  // Debug: log upstream responses in dev
+  if (process.env.NODE_ENV === "development") {
+    try {
+      const text = new TextDecoder().decode(body);
+      console.log(`[proxy] ${request.method} ${targetUrl} → ${upstreamResponse.status}`, text.slice(0, 2000));
+    } catch {}
+  }
 
   return new NextResponse(body, {
     status: upstreamResponse.status,
