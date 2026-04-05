@@ -16,7 +16,7 @@ const routes = [
     { label: "Comparison Matrix", href: "/compare", icon: TableProperties, iconClassName: "text-[#ea580c]" },
     { label: "Change Feed", href: "/diffs", icon: Activity, iconClassName: "text-[#10b981]" },
     { label: "Query Interface", href: "/query", icon: MessageSquare, iconClassName: "text-[#2563eb]" },
-{ label: "Approval Path", href: "/approval-path", icon: FileCheck, iconClassName: "text-[#16a34a]" },
+    { label: "Approval Path", href: "/approval-path", icon: FileCheck, iconClassName: "text-[#16a34a]" },
 ];
 
 export function AppSidebar() {

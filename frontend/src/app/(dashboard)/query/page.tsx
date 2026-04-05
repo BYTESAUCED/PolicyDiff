@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { BookOpen, Quote, ChevronDown, ArrowUp, AlertCircle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { apiFetch, ApiError } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -221,7 +222,31 @@ export default function QueryInterfacePage() {
                                                 </div>
                                             ) : (
                                                 <div className="prose prose-sm max-w-none text-foreground/90 prose-headings:text-foreground prose-p:leading-relaxed prose-p:text-foreground/80 prose-strong:text-foreground dark:prose-invert">
-                                                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                                                    <ReactMarkdown
+                                                        remarkPlugins={[remarkGfm]}
+                                                        components={{
+                                                            table: ({ children }) => (
+                                                                <div className="my-4 w-full overflow-x-auto rounded-lg border border-border">
+                                                                    <table className="w-full text-sm border-collapse">{children}</table>
+                                                                </div>
+                                                            ),
+                                                            thead: ({ children }) => (
+                                                                <thead className="bg-muted/60 text-xs uppercase tracking-wide text-foreground/70">{children}</thead>
+                                                            ),
+                                                            tbody: ({ children }) => (
+                                                                <tbody className="divide-y divide-border">{children}</tbody>
+                                                            ),
+                                                            tr: ({ children }) => (
+                                                                <tr className="hover:bg-muted/30 transition-colors">{children}</tr>
+                                                            ),
+                                                            th: ({ children }) => (
+                                                                <th className="px-4 py-2.5 text-left font-semibold whitespace-nowrap">{children}</th>
+                                                            ),
+                                                            td: ({ children }) => (
+                                                                <td className="px-4 py-2.5 text-foreground/80 align-top">{children}</td>
+                                                            ),
+                                                        }}
+                                                    >{msg.content}</ReactMarkdown>
                                                 </div>
                                             )}
 

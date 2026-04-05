@@ -73,7 +73,7 @@ export default function DashboardPage() {
     const { data: feedData, isLoading: loadingFeed } = useDiffsFeed(5);
     const { data: policiesData, isLoading: loadingPolicies } = usePolicies({ limit: 50 });
     const { data: prefsData } = useUserPreferences();
-    const { data: queriesData, isLoading: loadingQueries } = useRecentQueries(5);
+    const { data: queriesData, isLoading: loadingQueries } = useRecentQueries(50);
     const updatePreferences = useUpdatePreferences();
 
     const loading = loadingFeed || loadingPolicies;
@@ -81,8 +81,6 @@ export default function DashboardPage() {
     // Live feed data
     const recentChanges = feedData?.feed ?? [];
 
-    // Derive stats
-    const trackingCount = prefsData?.watchedDrugs?.length ?? 0;
     const changesThisWeek = recentChanges.filter(c => {
         if (!c.generatedAt) return false;
         return Date.now() - new Date(c.generatedAt).getTime() < 7 * 24 * 60 * 60 * 1000;
@@ -109,6 +107,9 @@ export default function DashboardPage() {
             const pd = drugPoliciesMap.get(name)!;
             return { name, payers: pd.payers, updatedPayers: 0, lastUpdate: pd.latest ? relativeTime(pd.latest) : "" };
         });
+
+    // Stat reflects the filtered list so it matches what's displayed
+    const trackingCount = watchedDrugs.length;
 
     const [query, setQuery] = useState("");
     const [open, setOpen] = useState(false);
@@ -197,7 +198,7 @@ export default function DashboardPage() {
                         <span className="text-muted-foreground">Tracking</span>
                         {loading
                             ? <Skeleton className="h-4 w-8" />
-                            : <span className="font-semibold text-foreground">{trackingCount} drugs</span>
+                            : <a href="#watched-drugs" className="font-semibold text-foreground hover:text-primary transition-colors cursor-pointer">{trackingCount} drugs</a>
                         }
                     </div>
                     <div className="w-[1px] h-3.5 bg-border dark:bg-white/10" />
@@ -281,7 +282,7 @@ export default function DashboardPage() {
             </div>
 
             {/* ── Watched Drugs ── */}
-            <section className="space-y-5">
+            <section id="watched-drugs" className="space-y-5 scroll-mt-6">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <div className="w-1 h-3.5 rounded-full bg-primary" />
@@ -447,7 +448,7 @@ export default function DashboardPage() {
                         </div>
                     ) : (
                         <div className="space-y-2">
-                            {queriesData.queries.slice(0, 5).map((q) => (
+                            {queriesData.queries.map((q) => (
                                 <div
                                     key={q.queryId}
                                     className="px-4 py-3 rounded-lg border border-border"
