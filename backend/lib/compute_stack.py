@@ -24,13 +24,16 @@ class PolicyDiffComputeStack(cdk.Stack):
         scope: Construct,
         construct_id: str,
         storage_stack: PolicyDiffStorageStack,
-        bedrock_model_arn: str = "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-5",
+        bedrock_model_arn: str = "arn:aws:bedrock:us-east-1:020871906551:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0",
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         # ADR: bedrock_model_arn from .env via app.py | Never hardcode model ARNs
         BEDROCK_MODEL_ARN = bedrock_model_arn
+        # ADR: Inference profile IAM | invoking an inference profile requires permission on both
+        # the profile ARN and the underlying foundation model ARN
+        BEDROCK_FM_ARN = "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0"
 
         # ADR: Dynamic arch detection | Supports Apple Silicon and Intel Macs
         host_arch = platform.machine()
@@ -279,7 +282,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         storage_stack.query_log_table.grant_write_data(self.query_fn)
         self.query_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
         # Fix 4: query_fn needs Titan embed for semantic search + VECTORS_BUCKET_NAME
         self.query_fn.add_to_role_policy(iam.PolicyStatement(
@@ -293,7 +296,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         storage_stack.drug_policy_criteria_table.grant_read_data(self.compare_fn)
         self.compare_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
 
         # DiffLambda
@@ -302,7 +305,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         storage_stack.policy_diffs_table.grant_write_data(self.diff_fn)
         self.diff_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
 
         # DiscordanceLambda
@@ -312,7 +315,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         # ADR: bedrock:InvokeModel grant | discordance.py calls bedrock.invoke_model() for analysis
         self.discordance_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
 
         # ApprovalPathLambda
@@ -322,14 +325,14 @@ class PolicyDiffComputeStack(cdk.Stack):
         storage_stack.approval_paths_table.grant_read_write_data(self.approval_path_fn)
         self.approval_path_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
 
         # SimulatorLambda
         storage_stack.drug_policy_criteria_table.grant_read_data(self.simulator_fn)
         self.simulator_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
 
         # EmbedAndIndexLambda
@@ -368,7 +371,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         storage_stack.policy_bucket.grant_read_write(self.bedrock_extract_fn)
         self.bedrock_extract_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
 
         # ConfidenceScoreLambda — reads DrugPolicyCriteria for calibration context
@@ -411,7 +414,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         ))
         workflow_role.add_to_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
         # Allow Step Functions to invoke all Lambda functions used in the workflow (Fix 6)
         for fn in [
