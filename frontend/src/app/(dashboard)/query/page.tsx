@@ -106,11 +106,11 @@ export default function QueryInterfacePage() {
 
                     {/* Large centered input — Gemini style */}
                     <div className="w-full max-w-2xl">
-                        <div className="relative bg-[#1a1a1a] border border-white/10 rounded-3xl px-5 pt-4 pb-3 focus-within:border-white/20 transition-colors shadow-xl">
+                        <div className="relative rounded-3xl border border-border bg-card px-5 pt-4 pb-3 shadow-xl transition-colors focus-within:border-ring dark:border-white/10 dark:bg-[#1a1a1a] dark:focus-within:border-white/20">
                             <Textarea
                                 ref={textareaRef}
                                 placeholder="Ask PolicyDiff..."
-                                className="w-full resize-none bg-transparent border-0 p-0 text-base shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/40 min-h-[32px] max-h-[160px]"
+                                className="min-h-[32px] max-h-[160px] w-full resize-none border-0 bg-transparent p-0 text-base text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0 focus-visible:ring-offset-0"
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
                                 onKeyDown={handleKeyDown}
@@ -119,7 +119,7 @@ export default function QueryInterfacePage() {
                             <div className="flex items-center justify-end mt-3">
                                 <Button
                                     size="icon"
-                                    className="h-8 w-8 rounded-full shrink-0"
+                                    className="h-8 w-8 shrink-0 rounded-full bg-secondary text-secondary-foreground hover:bg-secondary/90"
                                     disabled={!query.trim()}
                                     onClick={() => handleQuery()}
                                 >
@@ -134,7 +134,7 @@ export default function QueryInterfacePage() {
                                 <button
                                     key={i}
                                     onClick={() => handleQuery(sq)}
-                                    className="text-[13px] text-muted-foreground bg-[#1a1a1a] border border-white/10 hover:border-white/20 hover:text-foreground rounded-full px-4 py-1.5 transition-all"
+                                    className="rounded-full border border-border bg-card px-4 py-1.5 text-[13px] text-muted-foreground transition-all hover:border-ring/40 hover:bg-muted hover:text-foreground dark:border-white/10 dark:bg-[#1a1a1a] dark:hover:border-white/20"
                                 >
                                     {sq}
                                 </button>
@@ -152,7 +152,7 @@ export default function QueryInterfacePage() {
                             <div key={i}>
                                 {msg.role === "user" ? (
                                     <div className="flex justify-end">
-                                        <div className="max-w-[80%] bg-[#1a1a1a] border border-white/8 rounded-3xl rounded-tr-md px-5 py-3 text-sm leading-relaxed">
+                                        <div className="max-w-[80%] rounded-3xl rounded-tr-md border border-border bg-card px-5 py-3 text-sm leading-relaxed text-foreground dark:border-white/8 dark:bg-[#1a1a1a]">
                                             {msg.content}
                                         </div>
                                     </div>
@@ -172,14 +172,14 @@ export default function QueryInterfacePage() {
                                             </svg>
                                         </div>
                                         <div className="flex-1 min-w-0 space-y-5">
-                                            <div className="prose prose-invert prose-sm max-w-none text-foreground/90 prose-p:leading-relaxed prose-p:text-foreground/80 prose-headings:text-foreground prose-strong:text-foreground">
+                                            <div className="prose prose-sm max-w-none text-foreground/90 prose-headings:text-foreground prose-p:leading-relaxed prose-p:text-foreground/80 prose-strong:text-foreground dark:prose-invert">
                                                 <ReactMarkdown>{msg.content}</ReactMarkdown>
                                             </div>
 
                                             {/* Citations accordion */}
-                                            <div className="rounded-2xl border border-white/8 overflow-hidden text-sm">
+                                            <div className="overflow-hidden rounded-2xl border border-border text-sm dark:border-white/8">
                                                 <button
-                                                    className="w-full flex items-center justify-between px-4 py-3 text-muted-foreground hover:text-foreground hover:bg-white/[0.03] transition-colors"
+                                                    className="flex w-full items-center justify-between px-4 py-3 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground dark:hover:bg-white/[0.03]"
                                                     onClick={() => setCitationsOpen(!citationsOpen)}
                                                 >
                                                     <div className="flex items-center gap-2">
@@ -189,14 +189,14 @@ export default function QueryInterfacePage() {
                                                     <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${citationsOpen ? "rotate-180" : ""}`} />
                                                 </button>
                                                 {citationsOpen && (
-                                                    <div className="border-t border-white/8 divide-y divide-white/8">
+                                                    <div className="divide-y divide-border border-t border-border dark:divide-white/8 dark:border-white/8">
                                                         {citations.map((c, ci) => (
                                                             <div key={ci} className="px-4 py-3 space-y-2">
                                                                 <div className="flex items-center gap-2">
-                                                                    <span className="text-[10px] font-mono text-muted-foreground/60 border border-white/10 rounded px-1.5 py-0.5">{c.payer}</span>
+                                                                    <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60 dark:border-white/10">{c.payer}</span>
                                                                     <span className="text-xs text-foreground/70 font-medium">{c.doc}</span>
                                                                 </div>
-                                                                <div className="flex gap-2 pl-3 border-l border-white/10 text-xs text-muted-foreground">
+                                                                <div className="flex gap-2 border-l border-border pl-3 text-xs text-muted-foreground dark:border-white/10">
                                                                     <Quote className="h-3 w-3 shrink-0 mt-0.5 opacity-50" />
                                                                     <p className="italic leading-relaxed">{c.quote}</p>
                                                                 </div>
@@ -242,10 +242,10 @@ export default function QueryInterfacePage() {
             {!isEmpty && (
                 <div className="shrink-0 px-6 py-4">
                     <div className="max-w-2xl mx-auto">
-                        <div className="relative bg-[#1a1a1a] border border-white/10 rounded-3xl px-5 pt-4 pb-3 focus-within:border-white/20 transition-colors">
+                        <div className="relative rounded-3xl border border-border bg-card px-5 pt-4 pb-3 transition-colors focus-within:border-ring dark:border-white/10 dark:bg-[#1a1a1a] dark:focus-within:border-white/20">
                             <Textarea
                                 placeholder="Ask a follow-up..."
-                                className="w-full resize-none bg-transparent border-0 p-0 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/40 min-h-[24px] max-h-[160px]"
+                                className="min-h-[24px] max-h-[160px] w-full resize-none border-0 bg-transparent p-0 text-sm text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0 focus-visible:ring-offset-0"
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
                                 onKeyDown={handleKeyDown}
@@ -254,7 +254,7 @@ export default function QueryInterfacePage() {
                             <div className="flex items-center justify-end mt-3">
                                 <Button
                                     size="icon"
-                                    className="h-8 w-8 rounded-full shrink-0"
+                                    className="h-8 w-8 shrink-0 rounded-full bg-secondary text-secondary-foreground hover:bg-secondary/90"
                                     disabled={isResponding || !query.trim()}
                                     onClick={() => handleQuery()}
                                 >
