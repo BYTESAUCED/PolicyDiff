@@ -341,6 +341,7 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         # EmbedAndIndexLambda
         storage_stack.policy_bucket.grant_read(self.embed_index_fn)
+        storage_stack.drug_policy_criteria_table.grant_read_data(self.embed_index_fn)
         self.embed_index_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
             resources=[TITAN_EMBED_ARN],
@@ -684,7 +685,7 @@ class PolicyDiffComputeStack(cdk.Stack):
             self.discordance_fn, self.approval_path_fn, self.simulator_fn,
             self.bedrock_extract_fn, self.write_criteria_fn, self.trigger_diff_fn,
             self.classify_document_fn, self.assemble_text_fn, self.confidence_score_fn,
-            self.policy_monitor_fn,
+            self.policy_monitor_fn, self.embed_index_fn,
         ]
         for fn in _dynamo_gsi_fns:
             NagSuppressions.add_resource_suppressions(fn, [

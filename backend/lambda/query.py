@@ -189,7 +189,7 @@ def _vector_search(query_text: str, top_k: int = 10) -> list[dict]:
             topK=top_k,
             returnMetadata=True,
         )
-        return [v.get("metadata", {}) for v in result.get("vectors", [])]
+        return [{"score": v.get("score", 0), **v.get("metadata", {})} for v in result.get("vectors", [])]
     except Exception as e:
         logger.warning(json.dumps({"warning": "vector_search_failed", "detail": str(e)}))
         return []
@@ -226,7 +226,7 @@ def _retrieve_policy_data(query_text: str) -> str:
     vector_hits = _vector_search(query_text, top_k=15)
 
     if vector_hits:
-        logger.info(json.dumps({"action": "vector_search_hits", "count": len(vector_hits)}))
+        logger.info(json.dumps({"action": "vector_search_hits", "count": len(vector_hits), "top_score": vector_hits[0].get("score", 0) if vector_hits else 0}))
         policy_doc_ids = [h.get("policyDocId", "") for h in vector_hits if h.get("policyDocId")]
         drug_indication_ids = [h.get("drugIndicationId", "") for h in vector_hits if h.get("drugIndicationId")]
         records = _fetch_criteria_by_ids(drug_indication_ids, policy_doc_ids)

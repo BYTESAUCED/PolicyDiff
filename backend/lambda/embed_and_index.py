@@ -23,6 +23,7 @@ logger.setLevel(logging.INFO)
 DOCUMENTS_BUCKET_NAME = os.environ.get("DOCUMENTS_BUCKET_NAME", "")
 VECTORS_BUCKET_NAME = os.environ.get("VECTORS_BUCKET_NAME", "")
 TITAN_MODEL_ARN = os.environ.get("TITAN_MODEL_ARN", "")
+DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "")
 
 for _var, _val in [
     ("DOCUMENTS_BUCKET_NAME", DOCUMENTS_BUCKET_NAME),
@@ -37,6 +38,7 @@ for _var, _val in [
 s3 = boto3.client("s3")
 bedrock_runtime = boto3.client("bedrock-runtime", region_name=os.environ.get("REGION", "us-east-1"))
 s3vectors_client = boto3.client("s3vectors", region_name=os.environ.get("REGION", "us-east-1"))
+dynamodb_resource = boto3.resource("dynamodb")
 
 _CHUNK_CHAR_LIMIT = 2048  # ~512 tokens at 4 chars/token
 _INDEX_NAME = "policy-criteria-index"
@@ -91,6 +93,21 @@ def _parse_key(key: str) -> tuple[str, str]:
     return policy_doc_id, drug_indication_id
 
 
+def _fetch_criteria_metadata(policy_doc_id: str, drug_indication_id: str) -> dict:
+    """Fetch payerName/drugName/indicationName/effectiveDate from DynamoDB.
+    # ADR: DynamoDB lookup instead of event fields | StripPollResult Pass state strips these from the pipeline event
+    """
+    if not DRUG_POLICY_CRITERIA_TABLE:
+        return {}
+    try:
+        table = dynamodb_resource.Table(DRUG_POLICY_CRITERIA_TABLE)
+        result = table.get_item(Key={"policyDocId": policy_doc_id, "drugIndicationId": drug_indication_id})
+        return result.get("Item", {})
+    except Exception as e:
+        logger.warning(json.dumps({"action": "metadata_fetch_failed", "policyDocId": policy_doc_id, "drugIndicationId": drug_indication_id, "reason": str(e)}))
+        return {}
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Embed rawExcerpt text chunks and write vectors to S3 Vectors."""
     if isinstance(event, str):
@@ -110,17 +127,18 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     excerpt_keys: list[str] = event.get("excerptKeys", [])
     bucket = event.get("s3Bucket", DOCUMENTS_BUCKET_NAME)
 
-    # Context metadata passed through from earlier pipeline states
-    payer_name = event.get("payerName", "")
-    drug_name = event.get("drugName", "")
-    indication_name = event.get("indicationName", "")
-    effective_date = event.get("effectiveDate", "")
-
     total_vectors_written = 0
 
     try:
         for key in excerpt_keys:
             parsed_policy_id, drug_indication_id = _parse_key(key)
+
+            # Fetch metadata from DynamoDB — pipeline strips these fields from the event at StripPollResult
+            meta = _fetch_criteria_metadata(parsed_policy_id, drug_indication_id)
+            payer_name = meta.get("payerName", "")
+            drug_name = meta.get("drugName", "")
+            indication_name = meta.get("indicationName", "")
+            effective_date = meta.get("effectiveDate", "")
 
             # 1. Read excerpt text from S3
             try:
