@@ -321,6 +321,10 @@ class PolicyDiffComputeStack(cdk.Stack):
 
         # SimulatorLambda
         storage_stack.drug_policy_criteria_table.grant_read_data(self.simulator_fn)
+        self.simulator_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=[BEDROCK_MODEL_ARN],
+        ))
 
         # EmbedAndIndexLambda
         storage_stack.policy_bucket.grant_read(self.embed_index_fn)
@@ -422,10 +426,9 @@ class PolicyDiffComputeStack(cdk.Stack):
             },
         )
 
-        # ADR: OutputConfig on StartDocumentAnalysis | Writes Textract blocks to S3 so assemble_text
-        # can read them via textractOutputKey; without this assemble_text has no blocks to process
-        # ADR: OutputConfig prefix uses s3Key (not policyDocId) | policyDocId is parsed later by assemble_text;
-        # s3Key format is raw/{policyDocId}/raw.pdf so prefix is deterministic
+        # ADR: OutputConfig prefix includes policyDocId | assemble_text derives key as
+        # textract-output/{policyDocId}/{jobId}/1; Textract writes to {S3Prefix}/{jobId}/1
+        # so prefix must be textract-output/{policyDocId} for the paths to align
         start_textract = sfn_tasks.CallAwsService(
             self, "StartTextractJob",
             service="textract",
@@ -440,7 +443,7 @@ class PolicyDiffComputeStack(cdk.Stack):
                 "FeatureTypes": ["TABLES", "FORMS"],
                 "OutputConfig": {
                     "S3Bucket": sfn.JsonPath.string_at("$.s3Bucket"),
-                    "S3Prefix": "textract-output",
+                    "S3Prefix.$": "States.Format('textract-output/{}', $.policyDocId)",
                 },
             },
             result_path="$.textractResult",

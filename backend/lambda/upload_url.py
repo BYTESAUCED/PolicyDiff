@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 import boto3
@@ -19,9 +20,13 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 _BUCKET_NAME = os.environ.get("DOCUMENTS_BUCKET_NAME")
 if not _BUCKET_NAME:
     logger.error(json.dumps({"error": "missing_env_var", "var": "DOCUMENTS_BUCKET_NAME"}))
+_TABLE_NAME = os.environ.get("POLICY_DOCUMENTS_TABLE")
+if not _TABLE_NAME:
+    logger.error(json.dumps({"error": "missing_env_var", "var": "POLICY_DOCUMENTS_TABLE"}))
 
-# ADR: Module-level client | Reused across warm invocations for lower latency
+# ADR: Module-level clients | Reused across warm invocations for lower latency
 s3_client = boto3.client("s3")
+dynamodb = boto3.resource("dynamodb")
 
 
 def create_response(status_code: int, body: dict) -> dict:
@@ -44,11 +49,19 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     }))
 
     bucket_name = os.environ.get("DOCUMENTS_BUCKET_NAME")
-    if not bucket_name:
-        logger.error(json.dumps({"error": "missing_env_var", "var": "DOCUMENTS_BUCKET_NAME"}))
+    table_name = os.environ.get("POLICY_DOCUMENTS_TABLE")
+    if not bucket_name or not table_name:
+        logger.error(json.dumps({"error": "missing_env_var", "vars": ["DOCUMENTS_BUCKET_NAME", "POLICY_DOCUMENTS_TABLE"]}))
         return create_response(500, {"message": "Server configuration error"})
 
     try:
+        body: dict = {}
+        if event.get("body"):
+            try:
+                body = json.loads(event["body"])
+            except json.JSONDecodeError:
+                return create_response(400, {"message": "Invalid JSON body"})
+
         policy_doc_id = str(uuid.uuid4())
         s3_key = f"raw/{policy_doc_id}/raw.pdf"
 
@@ -64,6 +77,23 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             ExpiresIn=300,
         )
 
+        # ADR: Create PolicyDocuments row at presign time | classify_document and bedrock_extract
+        # enrich metadata only if the row already exists; without this row, extraction runs with
+        # empty payer/title/date context when POST /api/policies hasn't been called yet
+        now = datetime.now(timezone.utc).isoformat()
+        item: dict = {
+            "policyDocId": policy_doc_id,
+            "s3Key": s3_key,
+            "extractionStatus": "PENDING",
+            "createdAt": now,
+        }
+        # Carry forward any metadata the client provided at presign time
+        for field in ("payerName", "planType", "documentTitle", "effectiveDate", "policyNumber", "drugName"):
+            if body.get(field):
+                item[field] = body[field]
+
+        dynamodb.Table(table_name).put_item(Item=item)
+
         logger.info(json.dumps({
             "action": "presigned_url_generated",
             "policyDocId": policy_doc_id,
@@ -78,7 +108,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     except ClientError as e:
         logger.error(json.dumps({
-            "error": "s3_client_error",
+            "error": "aws_client_error",
             "detail": str(e),
             "code": e.response["Error"]["Code"],
         }))
