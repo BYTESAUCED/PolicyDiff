@@ -117,10 +117,11 @@ def _response(status: int, body: Any) -> dict:
 
 def _invoke_bedrock(prompt: str, max_tokens: int = 4096) -> str:
     body = json.dumps({
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": max_tokens,
-        "temperature": 0.2,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": [{"text": prompt}]}],
+        "inferenceConfig": {
+            "max_new_tokens": max_tokens,
+            "temperature": 0.2,
+        },
     })
     response = bedrock.invoke_model(
         modelId=BEDROCK_MODEL_ID,
@@ -129,7 +130,7 @@ def _invoke_bedrock(prompt: str, max_tokens: int = 4096) -> str:
         body=body,
     )
     result = json.loads(response["body"].read().decode("utf-8"))
-    return result["content"][0]["text"]
+    return result["output"]["message"]["content"][0]["text"]
 
 
 def _clean_json(text: str) -> str:

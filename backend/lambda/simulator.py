@@ -146,10 +146,11 @@ Respond with a JSON object only (no markdown fences):
 
 def _invoke_bedrock(prompt: str) -> dict:
     body = json.dumps({
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 1024,
-        "temperature": 0.1,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": [{"text": prompt}]}],
+        "inferenceConfig": {
+            "max_new_tokens": 1024,
+            "temperature": 0.1,
+        },
     })
     response = bedrock.invoke_model(
         modelId=BEDROCK_MODEL_ID,
@@ -158,7 +159,7 @@ def _invoke_bedrock(prompt: str) -> dict:
         body=body,
     )
     result = json.loads(response["body"].read().decode("utf-8"))
-    raw_text = result["content"][0]["text"].strip()
+    raw_text = result["output"]["message"]["content"][0]["text"].strip()
 
     # Strip markdown fences if present
     if raw_text.startswith("```"):
