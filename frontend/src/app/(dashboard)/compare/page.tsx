@@ -60,6 +60,8 @@ export default function ComparisonMatrixPage() {
         selectedIndication || undefined
     );
 
+    const primaryHcpcs = compareData?.hcpcsCode ?? null;
+
     // Extract unique drug names from policies for the dropdown
     const drugList = useMemo(() => {
         if (!policiesData?.items?.length) return [];
@@ -171,6 +173,11 @@ export default function ComparisonMatrixPage() {
                                 </>
                             )}
                         </select>
+                    )}
+                    {primaryHcpcs && (
+                        <span className="text-xs font-mono px-2 py-1 rounded bg-primary/10 text-primary border border-primary/20">
+                            {primaryHcpcs}
+                        </span>
                     )}
                 </div>
                 <div className="w-64 space-y-2">

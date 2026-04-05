@@ -1,12 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FileText, ArrowRight, Filter, Calendar, AlertCircle, ChevronDown } from "lucide-react";
+import { Filter, Calendar, AlertCircle, ChevronDown } from "lucide-react";
 import { useDiffsFeed, useDiffs } from "@/hooks/use-api";
+
+interface CriterionBreakdownEntry {
+  label: string;
+  oldValue?: string;
+  newValue?: string;
+}
 
 type TimeRange = "week" | "month" | "quarter" | "all";
 type SeverityFilter = "all" | "breaking" | "restrictive" | "relaxed";
@@ -71,6 +78,8 @@ export default function ChangeFeedPage() {
             oldValue: change.oldValue,
             newValue: change.newValue,
             generatedAt: item.generatedAt,
+            criterionBreakdown: change.criterionBreakdown as CriterionBreakdownEntry[] | undefined,
+            policyDocId: change.policyDocId ?? item.policyDocId,
         }))
     );
 
@@ -260,7 +269,7 @@ export default function ChangeFeedPage() {
                                             {item.humanSummary}
                                         </p>
 
-                                        {(item.oldValue || item.newValue) && (
+                                        {(item.oldValue || item.newValue || item.criterionBreakdown) && (
                                             <div className="pt-2">
                                                 <Button
                                                     variant="link"
@@ -272,33 +281,67 @@ export default function ChangeFeedPage() {
                                             </div>
                                         )}
 
-                                        {expanded.includes(itemKey) && (item.oldValue || item.newValue) && (
+                                        {expanded.includes(itemKey) && (item.oldValue || item.newValue || item.criterionBreakdown) && (
                                             <div className="mt-4 border border-border bg-background rounded-md overflow-hidden">
-                                                <div className="flex items-center p-2 bg-card border-b border-border text-xs text-muted-text gap-2">
-                                                    <FileText className="h-3 w-3" />
-                                                    <span>Before</span>
-                                                    <ArrowRight className="h-3 w-3" />
-                                                    <FileText className="h-3 w-3" />
-                                                    <span>After</span>
+                                                {/* Header row */}
+                                                <div className="grid grid-cols-2 border-b border-border text-xs text-muted-foreground font-medium">
+                                                    <div className="px-4 py-2 border-r border-border">Old</div>
+                                                    <div className="px-4 py-2">New</div>
                                                 </div>
-                                                <div className="p-4 space-y-3">
-                                                    <div className="grid grid-cols-[120px_1fr] items-start gap-4 text-sm">
-                                                        <span className="text-muted-text font-medium">{item.field || "Change"}:</span>
-                                                        <div className="flex items-center gap-4 flex-wrap">
+
+                                                {/* criterionBreakdown rows */}
+                                                {item.criterionBreakdown && item.criterionBreakdown.length > 0 ? (
+                                                    item.criterionBreakdown.map((cr, cri) => (
+                                                        <div key={cri} className="grid grid-cols-2 border-b border-border last:border-0 text-sm">
+                                                            <div className="px-4 py-3 border-r border-border">
+                                                                <span className="text-xs text-muted-foreground block mb-1">{cr.label}</span>
+                                                                {cr.oldValue && (
+                                                                    <span className="px-2 py-0.5 rounded bg-destructive/10 text-destructive line-through text-xs font-mono">
+                                                                        {cr.oldValue}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="px-4 py-3">
+                                                                <span className="text-xs text-muted-foreground block mb-1">{cr.label}</span>
+                                                                {cr.newValue && (
+                                                                    <span className="px-2 py-0.5 rounded bg-success/10 text-success text-xs font-mono">
+                                                                        {cr.newValue}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    /* Fallback: single old→new row */
+                                                    <div className="grid grid-cols-2 text-sm">
+                                                        <div className="px-4 py-3 border-r border-border">
                                                             {item.oldValue && (
-                                                                <span className="px-2 py-1 rounded bg-destructive/10 text-destructive line-through decoration-destructive/50">
+                                                                <span className="px-2 py-1 rounded bg-destructive/10 text-destructive line-through text-xs font-mono">
                                                                     {item.oldValue}
                                                                 </span>
                                                             )}
-                                                            <ArrowRight className="h-4 w-4 text-muted-text shrink-0" />
+                                                        </div>
+                                                        <div className="px-4 py-3">
                                                             {item.newValue && (
-                                                                <span className="px-2 py-1 rounded bg-success/10 text-success">
+                                                                <span className="px-2 py-1 rounded bg-success/10 text-success text-xs font-mono">
                                                                     {item.newValue}
                                                                 </span>
                                                             )}
                                                         </div>
                                                     </div>
-                                                </div>
+                                                )}
+
+                                                {/* View in Explorer link */}
+                                                {item.policyDocId && item.drugName && (
+                                                    <div className="px-4 py-2 border-t border-border bg-card">
+                                                        <Link
+                                                            href={`/explorer?drug=${encodeURIComponent(item.drugName)}`}
+                                                            className="text-xs text-sky-400 hover:text-sky-300 transition-colors"
+                                                        >
+                                                            View in Explorer →
+                                                        </Link>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </CardContent>

@@ -67,7 +67,14 @@ interface CriteriaItem {
     needsReview?: boolean;
     reviewReasons?: string[];
     preferredProducts?: { rank: number; productName: string }[];
+    selfAdminAllowed?: "infusion_center_only" | "home_infusion_allowed" | "office_only" | null;
 }
+
+const SITE_OF_CARE_LABELS: Record<string, string> = {
+  infusion_center_only: "Infusion center only",
+  home_infusion_allowed: "Home infusion allowed",
+  office_only: "Office only",
+};
 
 interface DrugGroup {
     drugName: string;
@@ -151,7 +158,6 @@ export default function DrugExplorerPage() {
     const handleViewPdf = async (policyDocId: string) => {
         try {
             setPendingAction({ id: policyDocId, type: "view" });
-            const p = drugGroups.flatMap(g => g.policies).find(p => p.policyDocId === policyDocId);
             const { downloadUrl } = await apiFetch<{ downloadUrl: string }>(`api/policies/${policyDocId}/download`);
             window.open(downloadUrl, "_blank", "noopener,noreferrer");
         } catch (err) {
@@ -443,6 +449,15 @@ export default function DrugExplorerPage() {
                                                                                             {c.needsReview && (
                                                                                                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400">needs review</span>
                                                                                             )}
+                                                                                            <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                                                                                                  c.selfAdminAllowed && SITE_OF_CARE_LABELS[c.selfAdminAllowed]
+                                                                                                    ? "bg-sky-500/10 text-sky-400 border-sky-500/20"
+                                                                                                    : "bg-muted text-muted-foreground border-border"
+                                                                                                }`}>
+                                                                                                  {c.selfAdminAllowed && SITE_OF_CARE_LABELS[c.selfAdminAllowed]
+                                                                                                    ? SITE_OF_CARE_LABELS[c.selfAdminAllowed]
+                                                                                                    : "Site of care: Not found"}
+                                                                                                </span>
                                                                                         </div>
                                                                                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                                                                             {c.indicationICD10 && c.indicationICD10.length > 0 && (

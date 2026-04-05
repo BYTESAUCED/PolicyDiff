@@ -104,6 +104,7 @@ OUTPUT FORMAT:
 Return a valid JSON array where each element is a DrugPolicyCriteriaRecord:
 {{
   "drugName": string,
+  "hcpcsCode": string | null,
   "brandNames": [string],
   "indicationName": string,
   "indicationICD10": [string] | null,
@@ -150,12 +151,13 @@ Return a valid JSON array where each element is a DrugPolicyCriteriaRecord:
   ],
   "quantityLimits": null,
   "benefitType": "medical",
-  "selfAdminAllowed": null,
+  "selfAdminAllowed": "infusion_center_only" | "home_infusion_allowed" | "office_only" | null,
   "coveredStatus": "covered" | "excluded" | "experimental",
   "confidence": number
 }}
 
 CRITICAL RULES:
+- hcpcsCode: Extract the HCPCS/J-code for this drug from the 'Applicable Codes' section (same section used for ICD-10). Look for entries like 'J1234 - Drug Name'. Set to null if not found.
 - Each indication block is INDEPENDENT. Never merge criteria across indications.
 - Preserve exact drug names from the document for requiredDrugsTriedFirst (e.g., "Inflectra" \
   not just "infliximab biosimilar").
@@ -165,6 +167,7 @@ CRITICAL RULES:
 - Set confidence below 0.7 if: criteria text is ambiguous, contains cross-references to \
   other policies, or has complex conditional structures you cannot fully resolve.
 - Do NOT invent values. Omit fields that are not stated in the document.
+- selfAdminAllowed: If the document contains a "Site of Care" section, table, or any text restricting where the drug may be administered, extract the restriction as one of: "infusion_center_only" (must be given at infusion center/hospital outpatient), "home_infusion_allowed" (may be given at home), "office_only" (physician office only). Set to null if no site-of-care restriction is mentioned.
 - Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
 
 Document text:
@@ -232,6 +235,7 @@ OUTPUT FORMAT:
 Return a valid JSON array of DrugPolicyCriteriaRecord objects:
 {{
   "drugName": string,
+  "hcpcsCode": string | null,
   "brandNames": [string],
   "indicationName": string,
   "indicationICD10": [string] | null,
@@ -272,12 +276,14 @@ Return a valid JSON array of DrugPolicyCriteriaRecord objects:
   }} | null,
   "combinationRestrictions": [],
   "benefitType": "medical",
+  "selfAdminAllowed": "infusion_center_only" | "home_infusion_allowed" | "office_only" | null,
   "coveredStatus": "covered" | "excluded" | "experimental",
   "exclusionReason": string | null,
   "confidence": number
 }}
 
 CRITICAL RULES:
+- hcpcsCode: Extract the HCPCS/J-code from the 'Coding' section tables. Look for J-codes (e.g. J1234) associated with the drug. Set to null if not found.
 - The Prescriber Specialties section maps per indication — always check this section for \
   prescriberType, not just the indication criteria blocks.
 - "either" = OR (binary choice). "any" = OR (multiple choices). Do not conflate these.
@@ -285,6 +291,7 @@ CRITICAL RULES:
 - For excluded indications (from "Experimental, Investigational, or Unproven"), create a \
   record with empty initialAuthCriteria and coveredStatus: "experimental".
 - Do NOT invent values. Omit fields not present in the document.
+- selfAdminAllowed: If the document contains a "Site of Care" section, table, or any text restricting where the drug may be administered, extract the restriction as one of: "infusion_center_only" (must be given at infusion center/hospital outpatient), "home_infusion_allowed" (may be given at home), "office_only" (physician office only). Set to null if no site-of-care restriction is mentioned.
 - Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
 
 Document text:
@@ -368,6 +375,7 @@ OUTPUT FORMAT:
 Return a valid JSON array of DrugPolicyCriteriaRecord objects:
 {{
   "drugName": string,
+  "hcpcsCode": string | null,
   "brandNames": [string],
   "indicationName": string,
   "indicationICD10": [string] | null,
@@ -410,6 +418,7 @@ Return a valid JSON array of DrugPolicyCriteriaRecord objects:
 }}
 
 CRITICAL RULES:
+- hcpcsCode: Extract the HCPCS/J-code from the 'Coding Information' section. Look for J-codes (e.g. J9264) associated with the drug. Set to null if not found.
 - The "ONE of the following (A or B)" at the top of each indication creates TWO SEPARATE \
   records: initialAuthCriteria (from Branch A) and reauthorizationCriteria (from Branch B).
   Never mix Branch A and Branch B criteria.
@@ -674,6 +683,7 @@ Pre-extracted ICD-10 mapping:
 OUTPUT FORMAT — Return a valid JSON array. One element per product + indication combination:
 {{
   "drugName": string,
+  "hcpcsCode": string | null,
   "brandNames": [string],
   "productName": string,
   "indicationName": string,
@@ -725,16 +735,18 @@ OUTPUT FORMAT — Return a valid JSON array. One element per product + indicatio
   "combinationRestrictions": [],
   "quantityLimits": null,
   "benefitType": "medical",
-  "selfAdminAllowed": null,
+  "selfAdminAllowed": "infusion_center_only" | "home_infusion_allowed" | "office_only" | null,
   "coveredStatus": "covered" | "unproven" | "excluded",
   "confidence": number
 }}
 
 CRITICAL RULES:
+- hcpcsCode: Extract the HCPCS/J-code for each specific product from the 'Applicable Codes' section. Each product may have a different J-code. Set to null if not found.
 - universalCriteria must appear on EVERY record — do not omit it.
 - Each product section is INDEPENDENT. Never cross-assign indications between products.
 - Daxxify (daxibotulinumtoxinA-lanm): if mentioned as excluded, set coveredStatus: "excluded".
 - Unproven conditions: coveredStatus: "unproven", empty initialAuthCriteria.
+- selfAdminAllowed: If the document contains a "Site of Care" section, table, or any text restricting where the drug may be administered, extract the restriction as one of: "infusion_center_only" (must be given at infusion center/hospital outpatient), "home_infusion_allowed" (may be given at home), "office_only" (physician office only). Set to null if no site-of-care restriction is mentioned.
 - Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
 
 Document text:
@@ -796,6 +808,7 @@ OUTPUT FORMAT — Return a valid JSON array. \
 One element per indication + phase (3 records per indication):
 {{
   "drugName": string,
+  "hcpcsCode": string | null,
   "brandNames": [string],
   "indicationName": string,
   "approvalPhase": "initial" | "continuation_1" | "continuation_2plus",
@@ -835,6 +848,7 @@ One element per indication + phase (3 records per indication):
 }}
 
 CRITICAL RULES:
+- hcpcsCode: Extract the HCPCS/J-code from the 'Coding Information' section. Look for J-codes (e.g. J9264) associated with the drug. Set to null if not found.
 - Phase A → approvalPhase: "initial", put all criteria in initialAuthCriteria.
 - Phase B → approvalPhase: "continuation_1", put criteria in initialAuthCriteria (for this phase's record).
 - Phase C → approvalPhase: "continuation_2plus", put criteria in initialAuthCriteria (for this phase's record).
@@ -896,6 +910,7 @@ Pre-extracted ICD-10 mapping:
 OUTPUT FORMAT — Return a valid JSON array. One element per product group + indication:
 {{
   "drugName": string,
+  "hcpcsCode": string | null,
   "brandNames": [string],
   "productGroup": "prolia_type" | "xgeva_type",
   "indicationName": string,
@@ -948,16 +963,19 @@ OUTPUT FORMAT — Return a valid JSON array. One element per product group + ind
   }} | null,
   "combinationRestrictions": [],
   "benefitType": "medical",
+  "selfAdminAllowed": "infusion_center_only" | "home_infusion_allowed" | "office_only" | null,
   "coveredStatus": "covered",
   "confidence": number
 }}
 
 CRITICAL RULES:
+- hcpcsCode: Extract the HCPCS/J-code for the drug if present in the document. Look for J-codes in any coding or billing section. Set to null if not found.
 - universalCriteria must appear on EVERY record — do not omit.
 - [DEFINED AS: ...] inline text is part of the criterion — include it in criterionText.
 - Prolia-type step therapy: OR between oral bisphosphonate (6-month) and IV zoledronic acid (12-month).
 - Preferred biosimilar hierarchy: Bildyos/Jubbonti preferred over Prolia; \
   Bilprevda/Wyost preferred over Xgeva.
+- selfAdminAllowed: If the document contains a "Site of Care" section, table, or any text restricting where the drug may be administered, extract the restriction as one of: "infusion_center_only" (must be given at infusion center/hospital outpatient), "home_infusion_allowed" (may be given at home), "office_only" (physician office only). Set to null if no site-of-care restriction is mentioned.
 - Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
 
 Document text:
@@ -1010,6 +1028,7 @@ Pre-extracted ICD-10 mapping:
 OUTPUT FORMAT — Return a valid JSON array. One element per Table 1 indication row:
 {{
   "drugName": string,
+  "hcpcsCode": string | null,
   "brandNames": [string],
   "indicationName": string,
   "indicationICD10": [string] | null,
@@ -1062,15 +1081,18 @@ OUTPUT FORMAT — Return a valid JSON array. One element per Table 1 indication 
   }} | null,
   "combinationRestrictions": [],
   "benefitType": "medical",
+  "selfAdminAllowed": "infusion_center_only" | "home_infusion_allowed" | "office_only" | null,
   "coveredStatus": "covered",
   "confidence": number
 }}
 
 CRITICAL RULES:
+- hcpcsCode: Extract the HCPCS/J-code for the drug if present in the document. Look for J-codes in any coding or billing section. Set to null if not found.
 - universalCriteria (from Section I) must appear on EVERY record.
 - BOTH/ALL → AND logic. ONE/ANY → OR logic. Map to logicOperator.
 - Mvasi and Zirabev are preferred; Avastin is non-preferred.
 - Do NOT extract "Description" section boilerplate or MCG disclaimers as clinical criteria.
+- selfAdminAllowed: If the document contains a "Site of Care" section, table, or any text restricting where the drug may be administered, extract the restriction as one of: "infusion_center_only" (must be given at infusion center/hospital outpatient), "home_infusion_allowed" (may be given at home), "office_only" (physician office only). Set to null if no site-of-care restriction is mentioned.
 - Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
 
 Document text:
@@ -1234,6 +1256,7 @@ The document covers one or more drugs across one or more indications. For EACH \
 drug-indication pair, extract:
 
 1. drugName: normalized generic name (e.g., "infliximab", never "Remicade")
+1.5. hcpcsCode: HCPCS/J-code for the drug (e.g. J1745). Extract from any coding or applicable codes section. Set to null if not found.
 2. brandNames: all brand names mentioned in this section
 3. indicationName: exact medical condition (e.g., "rheumatoid arthritis", \
 "Crohn's disease")
@@ -1259,12 +1282,13 @@ perFDALabel: bool}}
 "same_class"|"same_indication"|"absolute"}}]
 11. quantityLimits: {{maxUnitsPerPeriod, periodDays}}
 12. benefitType: "medical"|"pharmacy" based on document context
-13. selfAdminAllowed: boolean
+13. selfAdminAllowed: "infusion_center_only" | "home_infusion_allowed" | "office_only" | null — if the document contains a site-of-care section or table restricting where the drug may be administered, extract the restriction. Set to null if not mentioned.
 14. coveredStatus: "covered"|"excluded"|"experimental"
 15. rawExcerpt: the exact text passage you extracted this from (for citation)
 16. confidence: 0.0-1.0 — your confidence in the accuracy of this extraction
 
 CRITICAL RULES:
+- hcpcsCode: HCPCS/J-code for the drug (e.g. J1745). Extract from any coding or applicable codes section. Set to null if not found.
 - Parse conditional logic precisely. "All of the following" = AND (all must be \
 met). "One of the following" = OR (any one sufficient). Track this in logicOperator.
 - Each indication section is INDEPENDENT. Never merge criteria across indications.
@@ -1397,6 +1421,45 @@ PROMPT_MAP = {
 }
 
 # Explicit prompt ID → template lookup (used by bedrock_extract._get_prompt_template)
+# ─────────────────────────────────────────────────────────────────────────────
+# Prompt SITE_OF_CARE — Site-of-Care Administration Restrictions
+# ─────────────────────────────────────────────────────────────────────────────
+PROMPT_SITE_OF_CARE = """\
+You are extracting site-of-care administration restrictions from a payer policy document.
+
+Document metadata:
+- Payer: {payerName}
+- Document Title: {documentTitle}
+- Effective Date: {effectiveDate}
+
+EXTRACTION TASK:
+For each drug mentioned in this document, extract the administration setting restriction.
+
+Return a JSON array where each element is:
+{{
+  "drugName": string,
+  "payerName": string,
+  "effectiveDate": string,
+  "selfAdminAllowed": "infusion_center_only" | "home_infusion_allowed" | "office_only",
+  "rawExcerpt": string,
+  "confidence": number
+}}
+
+CLASSIFICATION RULES:
+- "infusion_center_only": drug must be administered at an infusion center or hospital
+  outpatient setting; home infusion is NOT covered
+- "home_infusion_allowed": drug may be administered at home by a home infusion provider
+- "office_only": drug must be administered in a physician office setting
+
+CRITICAL RULES:
+- If a drug has multiple settings listed, use the MOST RESTRICTIVE value.
+- If the restriction is ambiguous, set confidence below 0.7.
+- Return ONLY the JSON array. No explanation, no markdown.
+
+Document text:
+{documentText}"""
+
+
 PROMPT_ID_MAP: dict = {
     "A": PROMPT_A_UHC,
     "A_MULTIPRODUCT": PROMPT_A_UHC_MULTIPRODUCT,
@@ -1410,7 +1473,8 @@ PROMPT_ID_MAP: dict = {
     "F_PREFERRED": PROMPT_F_PREFERRED_PRODUCT,
     "G": PROMPT_G_EMBLEMHEALTH,
     "H": PROMPT_H_FLORIDA_BLUE,
+    "SITE_OF_CARE": PROMPT_SITE_OF_CARE,
 }
 
 # Document classes that should NOT be extracted (index-only)
-NO_EXTRACTION_CLASSES = {"self_admin", "pa_framework", "site_of_care"}
+NO_EXTRACTION_CLASSES = {"self_admin", "pa_framework"}

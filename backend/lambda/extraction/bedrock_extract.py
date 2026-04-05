@@ -108,20 +108,6 @@ def _repair_truncated_json(text: str) -> str:
     return text
 
 
-
-    """Strip markdown fences or preamble from model response."""
-    match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    text = text.strip()
-    if text and text[0] in ("[", "{"):
-        return text
-    for i, ch in enumerate(text):
-        if ch in ("[", "{"):
-            return text[i:]
-    return text
-
-
 def _chunk_document(full_text: str, max_chars: int = MAX_DOCUMENT_CHARS) -> list[str]:
     """Split very long documents into chunks that fit Claude's context."""
     if len(full_text) <= max_chars:

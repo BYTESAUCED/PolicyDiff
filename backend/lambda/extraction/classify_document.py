@@ -156,9 +156,12 @@ def classify_document(
         return {
             "documentClass": "site_of_care",
             "documentFormat": document_format,
-            "extractionPromptId": None,
-            "skipExtraction": True,
-            "payerStructureNote": "",
+            "extractionPromptId": "SITE_OF_CARE",
+            "skipExtraction": False,
+            "payerStructureNote": (
+                "Site-of-care policy. Extract selfAdminAllowed per drug. "
+                "Values: infusion_center_only | home_infusion_allowed | office_only."
+            ),
         }
 
     if "formulary exception" in title_lower:

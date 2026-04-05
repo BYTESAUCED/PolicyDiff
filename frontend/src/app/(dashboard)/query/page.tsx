@@ -14,6 +14,7 @@ interface Citation {
     documentTitle: string;
     effectiveDate: string;
     excerpt: string;
+    policyDocId?: string;
 }
 
 interface QueryResponse {
@@ -110,6 +111,17 @@ export default function QueryInterfacePage() {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             handleQuery();
+        }
+    };
+
+    const handleViewPdf = async (policyDocId: string) => {
+        try {
+            const { downloadUrl } = await apiFetch<{ downloadUrl: string }>(
+                `api/policies/${policyDocId}/download`
+            );
+            window.open(downloadUrl, "_blank", "noopener,noreferrer");
+        } catch {
+            // Non-critical — silently ignore
         }
     };
 
@@ -220,7 +232,7 @@ export default function QueryInterfacePage() {
                                                     {msg.content}
                                                 </div>
                                             ) : (
-                                                <div className="prose prose-sm max-w-none text-foreground/90 prose-headings:text-foreground prose-p:leading-relaxed prose-p:text-foreground/80 prose-strong:text-foreground dark:prose-invert">
+                                                <div className="prose prose-sm max-w-none text-foreground/90 prose-headings:text-foreground prose-p:leading-relaxed prose-p:text-foreground/80 prose-strong:text-foreground dark:prose-invert [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_th]:border [&_th]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1">
                                                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                                                 </div>
                                             )}
@@ -252,6 +264,14 @@ export default function QueryInterfacePage() {
                                                                         <span className="text-xs text-foreground/70 font-medium">{c.documentTitle}</span>
                                                                         {c.effectiveDate && (
                                                                             <span className="text-xs text-muted-foreground/50">· {c.effectiveDate}</span>
+                                                                        )}
+                                                                        {c.policyDocId && (
+                                                                            <button
+                                                                                onClick={() => handleViewPdf(c.policyDocId!)}
+                                                                                className="text-[10px] font-mono text-sky-400 hover:text-sky-300 transition-colors"
+                                                                            >
+                                                                                View PDF ↗
+                                                                            </button>
                                                                         )}
                                                                     </div>
                                                                     {c.excerpt && (
