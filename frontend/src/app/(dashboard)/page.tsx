@@ -281,8 +281,11 @@ export default function DashboardPage() {
                 </div>
             </div>
 
-            {/* ── Watched Drugs ── */}
-            <section id="watched-drugs" className="space-y-5 scroll-mt-6">
+            {/* ── Watched Drugs + Recent Queries side by side ── */}
+            <div className="flex items-stretch border border-border dark:border-white/10 rounded-lg overflow-hidden">
+
+            {/* Left: Watched Drugs */}
+            <section id="watched-drugs" className="w-1/2 min-h-full space-y-5 scroll-mt-6 p-5 border-r border-border dark:border-white/10">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <div className="w-1 h-3.5 rounded-full bg-primary" />
@@ -298,7 +301,7 @@ export default function DashboardPage() {
                 </div>
 
                 {loading ? (
-                    <div className="grid grid-cols-3 border border-border dark:border-white/10 rounded-lg divide-x divide-border dark:divide-white/10">
+                    <div className="flex flex-col divide-y divide-border dark:divide-white/10 rounded-lg border border-border dark:border-white/10">
                         {[0, 1, 2].map(i => (
                             <div key={i} className="px-5 py-5 space-y-4">
                                 <Skeleton className="h-4 w-24" />
@@ -316,7 +319,7 @@ export default function DashboardPage() {
                         No watched drugs yet. Search for a drug above and click <strong>Track</strong> to add it here.
                     </div>
                 ) : (
-                    <div className="grid grid-cols-3 border border-border dark:border-white/10 rounded-lg divide-x divide-border dark:divide-white/10 bg-transparent">
+                    <div className="flex flex-col divide-y divide-border dark:divide-white/10 rounded-lg border border-border dark:border-white/10 bg-transparent">
                         {watchedDrugs.slice(0, 3).map((drug, index) => (
                             <div
                                 key={drug.name}
@@ -358,77 +361,8 @@ export default function DashboardPage() {
                 )}
             </section>
 
-            {/* ── Bottom grid ── */}
-            <div className="grid grid-cols-7 gap-6">
-
-                {/* Recent Policy Changes */}
-                <section className="col-span-4 space-y-5">
-                    <div className="flex items-center gap-2">
-                        <div className="w-1 h-3.5 rounded-full bg-primary" />
-                        <h2 className="text-xs font-bold uppercase tracking-widest text-foreground">Recent Policy Changes</h2>
-                    </div>
-                    {loading ? (
-                        <div className="divide-y divide-border dark:divide-white/10 border-y border-border dark:border-white/10">
-                            {[0, 1, 2].map(i => (
-                                <div key={i} className="flex items-start gap-4 py-4 px-2">
-                                    <Skeleton className="h-2 w-2 rounded-full mt-2 shrink-0" />
-                                    <div className="flex-1 space-y-2">
-                                        <Skeleton className="h-4 w-48" />
-                                        <Skeleton className="h-3 w-full" />
-                                        <Skeleton className="h-3 w-3/4" />
-                                    </div>
-                                    <Skeleton className="h-3 w-16 shrink-0" />
-                                </div>
-                            ))}
-                        </div>
-                    ) : recentChanges.length === 0 ? (
-                        <div className="border-y border-border dark:border-white/10 py-8 text-center text-sm text-muted-foreground">
-                            No policy changes yet. Upload policies to see diffs here.
-                        </div>
-                    ) : (
-                        <div className="divide-y divide-border dark:divide-white/10 border-y border-border dark:border-white/10">
-                            {recentChanges.slice(0, 5).map((change) => {
-                                const type = severityToType(change.severity);
-                                return (
-                                    <Link key={change.diffId} href="/diffs" className="block group cursor-pointer hover:bg-muted/20 transition-colors">
-                                        <div className="flex items-start gap-4 py-4 px-2">
-                                            <div className="mt-1.5 shrink-0">
-                                                {type === "Clinical" ? (
-                                                    <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
-                                                ) : (
-                                                    <div className="w-2 h-2 rounded-full bg-muted-foreground/40" />
-                                                )}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{change.payerName}</span>
-                                                    <span className="text-muted-foreground/30 text-xs">·</span>
-                                                    <span className="text-xs font-mono text-muted-foreground">{change.drugName}</span>
-                                                    <span className="text-muted-foreground/30 text-xs">·</span>
-                                                    {type === "Clinical" ? (
-                                                        <span className="text-[10px] font-bold uppercase tracking-widest text-red-600 dark:text-red-400">Clinical</span>
-                                                    ) : (
-                                                        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Cosmetic</span>
-                                                    )}
-                                                </div>
-                                                <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">{change.humanSummary}</p>
-                                            </div>
-                                            <div className="text-right shrink-0">
-                                                <p className="text-xs text-muted-foreground">{relativeTime(change.generatedAt)}</p>
-                                            </div>
-                                        </div>
-                                    </Link>
-                                );
-                            })}
-                        </div>
-                    )}
-                    <Link href="/diffs" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-                        View all changes <ArrowRight className="h-3 w-3" />
-                    </Link>
-                </section>
-
-                {/* Recent Queries */}
-                <section className="col-span-3 space-y-5">
+                {/* Right: Recent Queries */}
+                <section className="w-1/2 min-h-full space-y-5 p-5">
                     <div className="flex items-center gap-2">
                         <div className="w-1 h-3.5 rounded-full bg-primary" />
                         <h2 className="text-xs font-bold uppercase tracking-widest text-foreground">Recent Queries</h2>
@@ -468,7 +402,8 @@ export default function DashboardPage() {
                         </div>
                     )}
                 </section>
-            </div>
+
+            </div>{/* end side-by-side grid */}
         </div>
     );
 }
