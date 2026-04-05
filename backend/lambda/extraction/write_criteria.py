@@ -31,8 +31,10 @@ POLICY_DOCUMENTS_TABLE = os.environ.get("POLICY_DOCUMENTS_TABLE", "PolicyDocumen
 DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "DrugPolicyCriteria")
 # Falls back to DrugPolicyCriteria if a dedicated formulary table is not provisioned
 FORMULARY_ENTRIES_TABLE = os.environ.get("FORMULARY_ENTRIES_TABLE", DRUG_POLICY_CRITERIA_TABLE)
+DOCUMENTS_BUCKET_NAME = os.environ.get("DOCUMENTS_BUCKET_NAME", "")
 
 dynamodb = boto3.resource("dynamodb")
+s3 = boto3.client("s3")
 
 
 def _convert_floats(obj: Any) -> Any:
@@ -166,18 +168,62 @@ def _update_policy_status(
         raise
 
 
+def _write_excerpt_files(policy_doc_id: str, criteria: list[dict], bucket: str) -> list[str]:
+    """Write per-criteria rawExcerpt text files to S3 for embed_and_index.
+
+    Key format: {policyDocId}/excerpts/{drugIndicationId}.txt
+    Returns list of S3 keys written.
+    """
+    if not bucket:
+        logger.warning(json.dumps({"warning": "DOCUMENTS_BUCKET_NAME not set, skipping excerpt write"}))
+        return []
+
+    keys: list[str] = []
+    for record in criteria:
+        drug_indication_id = record.get("drugIndicationId", "")
+        raw_excerpt = record.get("rawExcerpt", "") or record.get("indicationName", "")
+        if not drug_indication_id or not raw_excerpt:
+            continue
+
+        # Sanitize key segment — replace characters invalid in S3 keys
+        safe_id = drug_indication_id.replace("/", "_").replace("\\", "_")
+        key = f"{policy_doc_id}/excerpts/{safe_id}.txt"
+
+        try:
+            s3.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=raw_excerpt.encode("utf-8"),
+                ContentType="text/plain",
+            )
+            keys.append(key)
+        except Exception as e:
+            logger.warning(json.dumps({"warning": "excerpt_write_failed", "key": key, "reason": str(e)}))
+
+    logger.info(json.dumps({"action": "excerpts_written", "count": len(keys), "policyDocId": policy_doc_id}))
+    return keys
+
+
 def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     """Batch write extracted criteria to DynamoDB and update policy status."""
+    if isinstance(event, str):
+        try:
+            event = json.loads(event)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"event is a string and could not be parsed as JSON: {exc}") from exc
+    if not isinstance(event, dict):
+        raise TypeError(f"Expected event to be a dict, got {type(event).__name__}")
     logger.info(json.dumps({"state": "WriteToDynamoDB", "policyDocId": event.get("policyDocId")}))
 
     policy_doc_id: str = event["policyDocId"]
     criteria: list[dict] = event.get("extractedCriteria", [])
     confidence_summary: dict = event.get("confidenceSummary", {})
+    bucket: str = event.get("s3Bucket", DOCUMENTS_BUCKET_NAME)
 
     if not criteria:
         logger.warning(f"No criteria to write for policy {policy_doc_id}")
         _update_policy_status(policy_doc_id, "complete", 0, confidence_summary, event)
-        return {**event, "writeStatus": "complete", "recordsWritten": 0}
+        return {**event, "writeStatus": "complete", "recordsWritten": 0, "excerptKeys": []}
 
     # Route formulary entries separately from clinical criteria
     formulary_entries = [r for r in criteria if r.get("documentClass") == "formulary"]
@@ -195,8 +241,11 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         records_written += written
         logger.info(f"Wrote {written}/{len(formulary_entries)} formulary entries to {FORMULARY_ENTRIES_TABLE}")
 
+    # Write rawExcerpt text files to S3 so embed_and_index can vectorise them
+    excerpt_keys = _write_excerpt_files(policy_doc_id, criteria, bucket)
+
     review_count = confidence_summary.get("reviewCount", 0)
     status = "review_required" if review_count > 0 else "complete"
     _update_policy_status(policy_doc_id, status, records_written, confidence_summary, event)
 
-    return {**event, "writeStatus": "complete", "recordsWritten": records_written}
+    return {**event, "writeStatus": "complete", "recordsWritten": records_written, "excerptKeys": excerpt_keys}

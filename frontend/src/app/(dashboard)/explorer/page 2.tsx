@@ -137,7 +137,7 @@ export default function DrugExplorerPage() {
                 </div>
             </div>
 
-            <div className="overflow-hidden rounded-lg border border-black/15 bg-card shadow-sm">
+            <div className="rounded-lg border border-border">
                 <Table>
                     <TableHeader>
                         <TableRow className="border-b border-border hover:bg-transparent">
@@ -252,7 +252,7 @@ export default function DrugExplorerPage() {
                                                     </div>
                                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                                         {drug.payers.map((payer) => (
-                                                            <div key={payer} className="rounded-md border border-border bg-card p-3 text-sm space-y-2">
+                                                            <div key={payer} className="p-3 rounded-md border border-border text-sm space-y-2">
                                                                 <div className="flex items-center justify-between">
                                                                     <span className="font-medium">{payer}</span>
                                                                     <Badge variant="outline" className="border-0 bg-green-500/10 text-green-400 text-[10px] h-4">Active</Badge>
@@ -261,7 +261,7 @@ export default function DrugExplorerPage() {
                                                                     <span>Indications</span>
                                                                     <span className="font-mono">{Math.max(1, drug.indications - Math.floor(Math.random() * 3))}</span>
                                                                 </div>
-                                                                <div className="flex justify-between text-muted-foreground text-xs cursor-pointer hover:text-primary transition-colors">
+                                                                <div className="flex justify-between text-muted-foreground text-xs cursor-pointer hover:text-sky-400 transition-colors">
                                                                     <span>View criteria</span>
                                                                     <ChevronRight className="h-3 w-3" />
                                                                 </div>
@@ -281,3 +281,5 @@ export default function DrugExplorerPage() {
         </div>
     );
 }
+
+

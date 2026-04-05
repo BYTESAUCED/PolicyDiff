@@ -49,7 +49,7 @@ class PolicyDiffStorageStack(cdk.Stack):
                 name="policyDocId", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(point_in_time_recovery_enabled=True),
             encryption=dynamodb.TableEncryption.AWS_MANAGED,
             removal_policy=cdk.RemovalPolicy.RETAIN,
         )
@@ -76,7 +76,7 @@ class PolicyDiffStorageStack(cdk.Stack):
                 name="drugIndicationId", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(point_in_time_recovery_enabled=True),
             encryption=dynamodb.TableEncryption.AWS_MANAGED,
             removal_policy=cdk.RemovalPolicy.RETAIN,
         )
@@ -110,7 +110,7 @@ class PolicyDiffStorageStack(cdk.Stack):
                 name="diffId", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(point_in_time_recovery_enabled=True),
             encryption=dynamodb.TableEncryption.AWS_MANAGED,
             removal_policy=cdk.RemovalPolicy.RETAIN,
         )
@@ -134,7 +134,7 @@ class PolicyDiffStorageStack(cdk.Stack):
                 name="queryId", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(point_in_time_recovery_enabled=True),
             encryption=dynamodb.TableEncryption.AWS_MANAGED,
             removal_policy=cdk.RemovalPolicy.RETAIN,
         )
@@ -148,7 +148,7 @@ class PolicyDiffStorageStack(cdk.Stack):
                 name="approvalPathId", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(point_in_time_recovery_enabled=True),
             encryption=dynamodb.TableEncryption.AWS_MANAGED,
             removal_policy=cdk.RemovalPolicy.RETAIN,
         )
@@ -162,7 +162,7 @@ class PolicyDiffStorageStack(cdk.Stack):
                 name="userId", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(point_in_time_recovery_enabled=True),
             encryption=dynamodb.TableEncryption.AWS_MANAGED,
             removal_policy=cdk.RemovalPolicy.RETAIN,
         )

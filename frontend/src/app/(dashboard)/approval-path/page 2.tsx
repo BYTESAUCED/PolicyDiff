@@ -83,21 +83,21 @@ export default function ApprovalPathPage() {
                             <p className="text-xs font-medium text-muted-text uppercase tracking-wider">Drug & Indication</p>
                             <div className="space-y-2">
                                 <Label className="text-xs">Drug</Label>
-                                <select className="flex h-9 w-full rounded-md border border-input bg-card px-3 py-2 text-sm font-mono text-primary-text outline-none focus:ring-1 focus:ring-primary/50">
+                                <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-primary-text outline-none focus:ring-1 focus:ring-primary/50">
                                     <option>Infliximab</option>
                                     <option>Adalimumab</option>
                                 </select>
                             </div>
                             <div className="space-y-2">
                                 <Label className="text-xs">Indication</Label>
-                                <select className="flex h-9 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-primary-text outline-none focus:ring-1 focus:ring-primary/50">
+                                <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-primary-text outline-none focus:ring-1 focus:ring-primary/50">
                                     <option>Rheumatoid Arthritis</option>
                                     <option>Crohn&apos;s Disease</option>
                                 </select>
                             </div>
                             <div className="space-y-2">
                                 <Label className="text-xs">ICD-10 Code</Label>
-                                <Input defaultValue="M05.79" className="h-9 bg-card font-mono text-sm" />
+                                <Input defaultValue="M05.79" className="h-9 font-mono bg-background text-sm" />
                             </div>
                         </div>
 
@@ -108,12 +108,12 @@ export default function ApprovalPathPage() {
                                 { drug: "Methotrexate", weeks: 16 },
                                 { drug: "Inflectra",    weeks: 14 },
                             ].map((trial, i) => (
-                                <div key={i} className="rounded-lg border border-border bg-card p-3 space-y-2 shadow-sm">
+                                <div key={i} className="rounded-lg border border-border bg-background p-3 space-y-2">
                                     <Input defaultValue={trial.drug} className="h-8 font-mono text-sm bg-transparent border-0 px-0 focus-visible:ring-0 focus-visible:ring-offset-0" />
                                     <div className="flex gap-2">
-                                        <Input defaultValue={String(trial.weeks)} type="number" className="h-7 w-16 border-border bg-card text-right font-mono text-xs" />
+                                        <Input defaultValue={String(trial.weeks)} type="number" className="h-7 w-16 text-right font-mono text-xs bg-muted border-border" />
                                         <span className="text-xs text-muted-text self-center">wks</span>
-                                        <select className="flex-1 h-7 rounded-md border border-input bg-card px-2 text-xs text-primary-text">
+                                        <select className="flex-1 h-7 rounded-md border border-input bg-muted px-2 text-xs text-primary-text">
                                             <option>Inadequate Response</option>
                                             <option>Intolerance</option>
                                         </select>
@@ -128,7 +128,7 @@ export default function ApprovalPathPage() {
                             <p className="text-xs font-medium text-muted-text uppercase tracking-wider pt-3">Prescriber</p>
                             <div className="space-y-2">
                                 <Label className="text-xs">Specialty</Label>
-                                <select className="flex h-9 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-primary-text outline-none focus:ring-1 focus:ring-primary/50">
+                                <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-primary-text outline-none focus:ring-1 focus:ring-primary/50">
                                     <option>Rheumatologist</option>
                                     <option>Gastroenterologist</option>
                                     <option>Dermatologist</option>

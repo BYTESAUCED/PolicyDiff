@@ -32,7 +32,10 @@ logger.setLevel(logging.INFO)
 s3 = boto3.client("s3")
 bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-5-20250514")
+# ADR: BEDROCK_MODEL_ID from env | common_env passes the full model ARN; empty string causes fast-fail at invoke time
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
+if not BEDROCK_MODEL_ID:
+    logger.warning(json.dumps({"warning": "missing_env_var", "var": "BEDROCK_MODEL_ID"}))
 MAX_DOCUMENT_CHARS = 180_000
 
 
@@ -234,6 +237,13 @@ _CHUNKED_PROMPT_IDS = {"A", "A_MULTIPRODUCT", "B", "C", "C_3PHASE", "G", "H", "B
 
 def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     """Extract DrugPolicyCriteria records from structured policy text via Bedrock."""
+    if isinstance(event, str):
+        try:
+            event = json.loads(event)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"event is a string and could not be parsed as JSON: {exc}") from exc
+    if not isinstance(event, dict):
+        raise TypeError(f"Expected event to be a dict, got {type(event).__name__}")
     logger.info(json.dumps({
         "state": "BedrockSchemaExtraction",
         "policyDocId": event.get("policyDocId"),

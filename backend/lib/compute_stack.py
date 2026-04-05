@@ -24,13 +24,16 @@ class PolicyDiffComputeStack(cdk.Stack):
         scope: Construct,
         construct_id: str,
         storage_stack: PolicyDiffStorageStack,
-        bedrock_model_arn: str = "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-5",
+        bedrock_model_arn: str = "arn:aws:bedrock:us-east-1:020871906551:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0",
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         # ADR: bedrock_model_arn from .env via app.py | Never hardcode model ARNs
         BEDROCK_MODEL_ARN = bedrock_model_arn
+        # ADR: Inference profile IAM | invoking an inference profile requires permission on both
+        # the profile ARN and the underlying foundation model ARN
+        BEDROCK_FM_ARN = "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0"
 
         # ADR: Dynamic arch detection | Supports Apple Silicon and Intel Macs
         host_arch = platform.machine()
@@ -55,7 +58,8 @@ class PolicyDiffComputeStack(cdk.Stack):
             "REGION": cdk.Aws.REGION,
             # Fix 3: BEDROCK_MODEL_ID was missing — all Bedrock Lambdas need this
             "BEDROCK_MODEL_ID": bedrock_model_arn,
-            "CORS_ORIGIN": "*",  # Explicit wildcard; override at deploy time for production
+            # ADR: CORS_ORIGIN from env | Set CORS_ORIGIN in .env to restrict to frontend domain in production
+            "CORS_ORIGIN": os.environ.get("CORS_ORIGIN", "*"),
         }
 
         # ── Lambda definitions ────────────────────────────────────────────────
@@ -278,7 +282,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         storage_stack.query_log_table.grant_write_data(self.query_fn)
         self.query_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
         # Fix 4: query_fn needs Titan embed for semantic search + VECTORS_BUCKET_NAME
         self.query_fn.add_to_role_policy(iam.PolicyStatement(
@@ -292,7 +296,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         storage_stack.drug_policy_criteria_table.grant_read_data(self.compare_fn)
         self.compare_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
 
         # DiffLambda
@@ -301,13 +305,18 @@ class PolicyDiffComputeStack(cdk.Stack):
         storage_stack.policy_diffs_table.grant_write_data(self.diff_fn)
         self.diff_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
 
         # DiscordanceLambda
         storage_stack.drug_policy_criteria_table.grant_read_data(self.discordance_fn)
         # ADR: grant_read_write_data | get_discordance_detail writes computed results to PolicyDiffs
         storage_stack.policy_diffs_table.grant_read_write_data(self.discordance_fn)
+        # ADR: bedrock:InvokeModel grant | discordance.py calls bedrock.invoke_model() for analysis
+        self.discordance_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
+        ))
 
         # ApprovalPathLambda
         storage_stack.drug_policy_criteria_table.grant_read_data(self.approval_path_fn)
@@ -316,14 +325,14 @@ class PolicyDiffComputeStack(cdk.Stack):
         storage_stack.approval_paths_table.grant_read_write_data(self.approval_path_fn)
         self.approval_path_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
 
         # SimulatorLambda
         storage_stack.drug_policy_criteria_table.grant_read_data(self.simulator_fn)
         self.simulator_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
 
         # EmbedAndIndexLambda
@@ -362,15 +371,20 @@ class PolicyDiffComputeStack(cdk.Stack):
         storage_stack.policy_bucket.grant_read_write(self.bedrock_extract_fn)
         self.bedrock_extract_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
 
         # ConfidenceScoreLambda — reads DrugPolicyCriteria for calibration context
         storage_stack.drug_policy_criteria_table.grant_read_data(self.confidence_score_fn)
 
-        # WriteCriteriaLambda — writes DrugPolicyCriteria, updates PolicyDocuments
+        # WriteCriteriaLambda — writes DrugPolicyCriteria, updates PolicyDocuments, writes excerpt files to S3
         storage_stack.drug_policy_criteria_table.grant_read_write_data(self.write_criteria_fn)
         storage_stack.policy_documents_table.grant_read_write_data(self.write_criteria_fn)
+        # ADR: grant_put | write_criteria writes rawExcerpt .txt files to S3 for embed_and_index
+        storage_stack.policy_bucket.grant_put(self.write_criteria_fn)
+        NagSuppressions.add_resource_suppressions(self.write_criteria_fn, [
+            {"id": "AwsSolutions-IAM5", "reason": "S3 object-level access requires key prefix wildcard"},
+        ], apply_to_children=True)
 
         # TriggerDiffLambda — reads PolicyDocuments, invokes DiffLambda async (Fix 5)
         storage_stack.policy_documents_table.grant_read_data(self.trigger_diff_fn)
@@ -400,7 +414,7 @@ class PolicyDiffComputeStack(cdk.Stack):
         ))
         workflow_role.add_to_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
-            resources=[BEDROCK_MODEL_ARN],
+            resources=[BEDROCK_MODEL_ARN, BEDROCK_FM_ARN],
         ))
         # Allow Step Functions to invoke all Lambda functions used in the workflow (Fix 6)
         for fn in [
@@ -487,41 +501,31 @@ class PolicyDiffComputeStack(cdk.Stack):
         assemble_text = sfn_tasks.LambdaInvoke(
             self, "AssembleStructuredText",
             lambda_function=self.assemble_text_fn,
-            payload=sfn.TaskInput.from_json_path_at("$"),
-            result_path="$.assembleResult",
-            payload_response_only=True,
+            output_path="$.Payload",
         )
 
         classify_document = sfn_tasks.LambdaInvoke(
             self, "ClassifyDocument",
             lambda_function=self.classify_document_fn,
-            payload=sfn.TaskInput.from_json_path_at("$"),
-            result_path="$.classifyResult",
-            payload_response_only=True,
+            output_path="$.Payload",
         )
 
         bedrock_extraction = sfn_tasks.LambdaInvoke(
             self, "BedrockSchemaExtraction",
             lambda_function=self.bedrock_extract_fn,
-            payload=sfn.TaskInput.from_json_path_at("$"),
-            result_path="$.extractionResult",
-            payload_response_only=True,
+            output_path="$.Payload",
         )
 
         confidence_scoring = sfn_tasks.LambdaInvoke(
             self, "ConfidenceScoring",
             lambda_function=self.confidence_score_fn,
-            payload=sfn.TaskInput.from_json_path_at("$"),
-            result_path="$.scoringResult",
-            payload_response_only=True,
+            output_path="$.Payload",
         )
 
         write_to_dynamo = sfn_tasks.LambdaInvoke(
             self, "WriteToDynamoDB",
             lambda_function=self.write_criteria_fn,
-            payload=sfn.TaskInput.from_json_path_at("$"),
-            result_path="$.writeResult",
-            payload_response_only=True,
+            output_path="$.Payload",
         )
 
         execution_complete = sfn.Succeed(self, "ExecutionComplete")
@@ -530,18 +534,14 @@ class PolicyDiffComputeStack(cdk.Stack):
         trigger_diff_state = sfn_tasks.LambdaInvoke(
             self, "TriggerDiffIfVersionExists",
             lambda_function=self.trigger_diff_fn,
-            payload=sfn.TaskInput.from_json_path_at("$"),
-            result_path="$.triggerDiffResult",
-            payload_response_only=True,
+            output_path="$.Payload",
         )
 
         # State 6.5 — EmbedAndIndex (non-blocking: catches all errors and continues)
         embed_and_index = sfn_tasks.LambdaInvoke(
             self, "EmbedAndIndex",
             lambda_function=self.embed_index_fn,
-            payload=sfn.TaskInput.from_json_path_at("$"),
-            result_path="$.embedResult",
-            payload_response_only=True,
+            output_path="$.Payload",
         )
         embed_and_index.add_catch(
             trigger_diff_state,
@@ -556,9 +556,22 @@ class PolicyDiffComputeStack(cdk.Stack):
             backoff_rate=1.0,
         )
 
+        # ADR: StripPollResult Pass state | pollResult contains Textract block data that bloats the
+        # state payload past the 256KB Step Functions limit, causing downstream Lambdas to receive
+        # the state as a serialized string instead of a dict. Strip it immediately after the choice.
+        strip_poll_result = sfn.Pass(
+            self, "StripPollResult",
+            parameters={
+                "s3Bucket.$": "$.s3Bucket",
+                "s3Key.$": "$.s3Key",
+                "policyDocId.$": "$.policyDocId",
+                "textractResult.$": "$.textractResult",
+            },
+        )
+
         poll_loop = (
             textract_complete
-            .when(textract_succeeded, assemble_text)
+            .when(textract_succeeded, strip_poll_result)
             .when(textract_failed, extraction_failed)
             .otherwise(wait_for_textract.next(poll_textract))
         )
@@ -571,9 +584,12 @@ class PolicyDiffComputeStack(cdk.Stack):
             .next(poll_textract)
             .next(textract_complete)
         )
-        # Chain after poll_loop resolves to assemble_text path
-        assemble_text.next(classify_document)
-        classify_document.next(bedrock_extraction)
+        # ADR: classify_document before assemble_text | assemble_text needs payerName + extractionPromptId
+        # for payer-specific boilerplate stripping and indication chunking; classify_document reads
+        # these from DynamoDB and injects them into the state before assemble_text runs
+        strip_poll_result.next(classify_document)
+        classify_document.next(assemble_text)
+        assemble_text.next(bedrock_extraction)
         bedrock_extraction.next(confidence_scoring)
         confidence_scoring.next(write_to_dynamo)
         write_to_dynamo.next(embed_and_index)
@@ -627,7 +643,7 @@ class PolicyDiffComputeStack(cdk.Stack):
                 input=events.RuleTargetInput.from_object({
                     "s3Bucket": events.EventField.from_path("$.detail.bucket.name"),
                     "s3Key": events.EventField.from_path("$.detail.object.key"),
-                    # ADR: policyDocId parsed from s3Key by assemble_text_fn | EventBridge can't split strings
+                    # ADR: policyDocId parsed from s3Key by ExtractPolicyDocId Pass state | EventBridge can't split strings
                 }),
             )
         )

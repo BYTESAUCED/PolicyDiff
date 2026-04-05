@@ -17,6 +17,7 @@ env/
 
 # CDK
 cdk.out/
+cdk.out*/
 .cdk.staging/
 *.js.map
 

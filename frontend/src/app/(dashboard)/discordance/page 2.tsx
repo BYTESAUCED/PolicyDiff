@@ -54,10 +54,10 @@ const discordances = [
 
 const sevColor = (sev: string) =>
     sev === "destructive"
-        ? "text-destructive"
+        ? "text-red-400"
         : sev === "warning"
-            ? "text-warning"
-            : "text-success";
+            ? "text-amber-400"
+            : "text-emerald-400";
 
 export default function DiscordancePage() {
     const [searchQuery, setSearchQuery] = useState("");
@@ -83,19 +83,19 @@ export default function DiscordancePage() {
                         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                         <Input
                             placeholder="Filter..."
-                            className="pl-9 w-48 bg-card border-border"
+                            className="pl-9 w-48"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                         />
                     </div>
-                    <Button variant="outline" size="icon" className="shrink-0 bg-card">
+                    <Button variant="outline" size="icon" className="shrink-0">
                         <Filter className="h-4 w-4" />
                     </Button>
                 </div>
             </div>
 
             {/* Table */}
-            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            <div className="rounded-xl border border-border overflow-hidden">
                 <Table>
                     <TableHeader>
                         <TableRow className="border-b border-border hover:bg-transparent">
@@ -110,7 +110,7 @@ export default function DiscordancePage() {
                     </TableHeader>
                     <TableBody>
                         {filtered.map((item) => (
-                            <TableRow key={item.id} className="border-border hover:bg-muted/20">
+                            <TableRow key={item.id} className="border-border hover:bg-white/[0.02]">
                                 <TableCell className="h-12 px-5 font-medium text-sm">{item.drug}</TableCell>
                                 <TableCell className="h-12 px-4 text-sm text-muted-foreground">{item.payer}</TableCell>
                                 <TableCell className="h-12 px-4">
@@ -126,8 +126,8 @@ export default function DiscordancePage() {
                                 </TableCell>
                                 <TableCell className="h-14 px-4">
                                     <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${item.mostRestrictive === "medical"
-                                        ? "border-destructive/30 text-destructive bg-destructive/5"
-                                        : "border-warning/30 text-warning bg-warning/5"
+                                        ? "border-red-500/30 text-red-400 bg-red-500/5"
+                                        : "border-amber-500/30 text-amber-400 bg-amber-500/5"
                                         }`}>
                                         {item.mostRestrictive === "medical" ? "Medical" : "Pharmacy"}
                                     </span>

@@ -163,7 +163,7 @@ export default function ComparisonMatrixPage() {
                 </div>
             </div>
 
-            <div className="ag-theme-alpine flex-1 w-full rounded-md border border-border bg-card overflow-hidden shadow-sm custom-ag-grid">
+            <div className="ag-theme-alpine-dark flex-1 w-full rounded-md border border-border overflow-hidden custom-ag-grid">
                 <AgGridReact
                     rowData={rowData}
                     columnDefs={columnDefs}
@@ -177,16 +177,15 @@ export default function ComparisonMatrixPage() {
             <style jsx global>{`
                 .custom-ag-grid {
                     --ag-background-color: var(--card);
-                    --ag-header-background-color: var(--card);
+                    --ag-header-background-color: #0f0f0f;
                     --ag-border-color: var(--border);
                     --ag-row-border-color: var(--border);
-                    --ag-odd-row-background-color: color-mix(in srgb, var(--card) 88%, var(--background));
+                    --ag-odd-row-background-color: var(--background);
                     --ag-font-family: inherit;
                     --ag-font-size: 14px;
-                    --ag-header-foreground-color: var(--foreground);
-                    --ag-secondary-foreground-color: var(--muted-foreground);
-                    --ag-data-color: var(--foreground);
-                    --ag-row-hover-color: color-mix(in srgb, var(--muted) 85%, transparent);
+                    --ag-header-foreground-color: #f1f5f9;
+                    --ag-secondary-foreground-color: #94a3b8;
+                    --ag-data-color: #f1f5f9;
                     --ag-pinned-column-shadow: none;
                 }
                 .custom-ag-grid .ag-header-cell {

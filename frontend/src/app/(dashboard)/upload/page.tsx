@@ -29,15 +29,15 @@ export default function PolicyUploadPage() {
                 </p>
             </div>
 
-            <div className="flex flex-row flex-1 min-h-0 items-stretch border border-border rounded-xl overflow-hidden bg-[#111113]">
+            <div className="flex flex-row flex-1 min-h-0 items-stretch border border-border rounded-xl overflow-hidden bg-card">
                 {/* Left — Drop zone + progress */}
                 <div className="flex-1 flex flex-col gap-4 p-6">
                     <Card className={cn(
-                        "border-dashed border-2 transition-all group cursor-pointer hover:border-primary/50 bg-[#111113] flex-1",
+                        "border-dashed border-2 transition-all group cursor-pointer hover:border-primary/50 bg-card flex-1 shadow-sm",
                         uploadState === 'idle' ? 'border-border' : 'border-primary/50'
                     )}>
                         <CardContent className="flex flex-col items-center justify-center h-full text-center gap-4">
-                            <div className="p-5 rounded-full bg-white/5 group-hover:bg-primary/10 transition-colors">
+                            <div className="p-5 rounded-full bg-muted/70 group-hover:bg-primary/10 transition-colors">
                                 <UploadCloud className="h-10 w-10 text-muted-text group-hover:text-primary transition-colors" />
                             </div>
                             <div>
@@ -99,7 +99,7 @@ export default function PolicyUploadPage() {
                             <div className="flex-1 space-y-5">
                                 <div className="space-y-2">
                                     <Label htmlFor="payer">Payer Name</Label>
-                                    <select id="payer" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-primary-text outline-none focus:ring-1 focus:ring-primary/50">
+                                    <select id="payer" className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring">
                                         <option>UnitedHealthcare</option>
                                         <option>Aetna</option>
                                         <option>Cigna</option>
@@ -108,7 +108,7 @@ export default function PolicyUploadPage() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="planType">Plan Type</Label>
-                                    <select id="planType" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-primary-text outline-none focus:ring-1 focus:ring-primary/50">
+                                    <select id="planType" className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring">
                                         <option>Commercial</option>
                                         <option>Medicare Advantage</option>
                                         <option>Medicaid</option>
@@ -116,15 +116,15 @@ export default function PolicyUploadPage() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="title">Document Title</Label>
-                                    <Input id="title" placeholder="e.g. Infliximab Medical Benefit Policy" className="bg-background border-border" />
+                                    <Input id="title" placeholder="e.g. Infliximab Medical Benefit Policy" className="border-border bg-card" />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="date">Effective Date</Label>
-                                    <Input id="date" type="date" className="bg-background border-border font-mono text-sm" />
+                                    <Input id="date" type="date" className="border-border bg-card font-mono text-sm" />
                                 </div>
                             </div>
 
-                            <Button type="submit" size="lg" className="w-full font-semibold mt-auto" disabled={uploadState !== "idle"}>
+                            <Button type="submit" size="lg" className="mt-auto w-full bg-secondary text-secondary-foreground font-semibold hover:bg-secondary/90" disabled={uploadState !== "idle"}>
                                 {uploadState === "idle" ? "Upload and Extract" : "Processing..."}
                             </Button>
                         </form>

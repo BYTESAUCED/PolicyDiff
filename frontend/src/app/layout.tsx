@@ -25,7 +25,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className="h-full" suppressHydrationWarning>
       <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans h-full bg-background text-primary-text antialiased`}>
         <Auth0Provider>
           <QueryProvider>

@@ -320,6 +320,13 @@ def classify_document(
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Classify document type and determine extraction routing."""
+    if isinstance(event, str):
+        try:
+            event = json.loads(event)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"event is a string and could not be parsed as JSON: {exc}") from exc
+    if not isinstance(event, dict):
+        raise TypeError(f"Expected event to be a dict, got {type(event).__name__}")
     logger.info(json.dumps({"state": "ClassifyDocument", "policyDocId": event.get("policyDocId")}))
 
     payer_name = event.get("payerName", "")
@@ -344,6 +351,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "payerName": payer_name,
                     "documentTitle": document_title,
                 }))
+                # ADR: merge enriched fields back into event | assemble_text + bedrock_extract need payerName
+                event = {
+                    **event,
+                    "payerName": payer_name,
+                    "documentTitle": document_title,
+                    "policyNumber": policy_number,
+                }
             except Exception as e:
                 logger.warning(f"Could not enrich metadata from DynamoDB: {e}")
 
