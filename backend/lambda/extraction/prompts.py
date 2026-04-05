@@ -46,17 +46,20 @@ Document metadata:
 
 DOCUMENT STRUCTURE — UHC policies follow this EXACT template. Use section names to navigate:
 
-STEP 1 — BEFORE parsing clinical criteria, extract the ICD-10 mapping from the \
-"Applicable Codes" section. This section appears BEFORE the Diagnosis-Specific Criteria \
-section in the document. It contains statements like:
-  "[Indication Name]: [ICD-10-1], [ICD-10-2], [ICD-10-3]"
+STEP 1 — HCPCS/J-CODE EXTRACTION (do this FIRST):
+Scan the "Applicable Codes" section for entries matching the pattern:
+"[J-code] [drug description]" (for example: "J1745 Injection, infliximab, 10 mg")
+Build a lookup: {{ drugName: hcpcsCode }}. If no J-code is found for a drug, set hcpcsCode to null.
+
+STEP 2 — Extract the ICD-10 mapping from the same "Applicable Codes" section. It contains \
+statements like: "[Indication Name]: [ICD-10-1], [ICD-10-2], [ICD-10-3]"
 Build a lookup map: {{ indicationName: [icd10codes] }}.
 
-STEP 2 — Extract preferred product information from the "Coverage Rationale" section, \
+STEP 3 — Extract preferred product information from the "Coverage Rationale" section, \
 which comes BEFORE the Diagnosis-Specific Criteria. It contains a "Preferred Product" \
 subsection listing biosimilars in preference order (rank 1 = most preferred).
 
-STEP 3 — Parse the "Diagnosis-Specific Criteria" section. For each indication:
+STEP 4 — Parse the "Diagnosis-Specific Criteria" section. For each indication:
 
   INDICATION DETECTION: A new indication block begins with a bold statement matching the \
   pattern: "Infliximab is proven for the treatment of [INDICATION]."
@@ -67,12 +70,17 @@ STEP 3 — Parse the "Diagnosis-Specific Criteria" section. For each indication:
   CONTINUATION CRITERIA: The block "For continuation of therapy, all of the following:" \
   contains reauthorization criteria.
 
-  LOGIC MARKERS:
-  - "all of the following" = AND (every item must be met)
-  - "one of the following" = OR (any one is sufficient)
-  - "History of failure to [N] of the following" = step therapy; N is the minimum number \
-    of drugs that must have been tried. Extract N as the count.
-  - Sub-bullets marked with "o" are alternatives within an OR block.
+  LOGIC OPERATOR MAPPING (non-negotiable):
+  "all of the following" → AND
+  "both of the following" → AND
+  "one of the following" → OR
+  "any of the following" → OR
+  "either of the following" → OR
+  If the document uses different phrasing, default to AND unless the text clearly implies alternatives.
+
+  STEP THERAPY SIGNAL PHRASES (exact text to scan for): "inadequate response to", \
+  "failure of", "history of failure", "trial of at least", "must have tried", \
+  "prior treatment with". If NONE of these phrases appear, do NOT create a step_therapy criterion.
 
   AUTHORIZATION DURATION: Look for the phrase "Initial authorization is for no more than \
   [N] months" in the continuation criteria block. Extract N as initialAuthDurationMonths.
@@ -87,7 +95,7 @@ STEP 3 — Parse the "Diagnosis-Specific Criteria" section. For each indication:
   COMBINATION RESTRICTIONS: Look for "Patient is NOT receiving [drugName] in combination with" \
   followed by a list. Extract each listed drug as a combinationRestrictions entry.
 
-STEP 4 — For each indication, merge the ICD-10 codes from Step 1 using the indication name \
+STEP 5 — For each indication, merge the ICD-10 codes from Step 2 using the indication name \
 as the key. If no match is found, set indicationICD10 to null.
 
 Pre-extracted ICD-10 mapping (use this to populate indicationICD10 fields):
@@ -96,9 +104,24 @@ Pre-extracted ICD-10 mapping (use this to populate indicationICD10 fields):
 BOILERPLATE: Ignore the "Instructions for Use" section at the end of the document. It is \
 administrative boilerplate and contains no clinical criteria.
 
-CROSS-REFERENCES: If the criteria text references another UHC policy (e.g., "see Maximum \
-Dosage and Frequency Policy"), note this in criterionText but do not invent values for the \
+CROSS-REFERENCES: If the criteria text references another UHC policy (for example \
+"see Maximum Dosage and Frequency Policy"), note this in criterionText but do not invent values for the \
 referenced data.
+
+DRUG NAME NORMALIZATION (always use generic name):
+Remicade → infliximab | Humira → adalimumab | Enbrel → etanercept | Rituxan → rituximab
+Herceptin → trastuzumab | Avastin → bevacizumab | Stelara → ustekinumab | Cosentyx → secukinumab
+Skyrizi → risankizumab | Tremfya → guselkumab | Prolia / Xgeva → denosumab
+Botox → onabotulinumtoxinA | Dysport → abobotulinumtoxinA | Myobloc → rimabotulinumtoxinB
+Xeomin → incobotulinumtoxinA
+
+CONFIDENCE SCORING RUBRIC:
+1.0 — All criteria extracted verbatim, no ambiguity, no cross-references
+0.9 — Minor formatting ambiguity resolved, all values present
+0.8 — One cross-reference to another policy; values inferred from context
+0.7 — Multiple cross-references OR complex nested logic with >3 levels
+0.6 — Criteria text is ambiguous; could be interpreted multiple ways
+<0.6 — Do not use; flag for human review instead
 
 OUTPUT FORMAT:
 Return a valid JSON array where each element is a DrugPolicyCriteriaRecord:
@@ -157,17 +180,14 @@ Return a valid JSON array where each element is a DrugPolicyCriteriaRecord:
 }}
 
 CRITICAL RULES:
-- hcpcsCode: Extract the HCPCS/J-code for this drug from the 'Applicable Codes' section (same section used for ICD-10). Look for entries like 'J1234 - Drug Name'. Set to null if not found.
+- hcpcsCode: Use the J-code lookup built in STEP 1. Set to null if not found.
+- rawExcerpt MUST be the verbatim text from the document (max 300 characters). Do NOT paraphrase. If the source text is longer than 300 characters, truncate with "..." at a sentence boundary.
+- For optional fields: use null (not omit, not empty string) when the value is not present in the document. Exception: arrays should be [] when empty, not null.
 - Each indication block is INDEPENDENT. Never merge criteria across indications.
-- Preserve exact drug names from the document for requiredDrugsTriedFirst (e.g., "Inflectra" \
-  not just "infliximab biosimilar").
-- If a criterion says "History of failure to 1 of the following [list]", set \
-  stepTherapyMinCount to 1 (not the count of drugs listed).
+- Preserve exact drug names from the document for requiredDrugsTriedFirst (for example "Inflectra" not just "infliximab biosimilar").
+- If a criterion says "History of failure to 1 of the following [list]", set stepTherapyMinCount to 1 (not the count of drugs listed).
 - For continuation criteria, if auth duration is stated, set maxAuthDurationMonths.
-- Set confidence below 0.7 if: criteria text is ambiguous, contains cross-references to \
-  other policies, or has complex conditional structures you cannot fully resolve.
-- Do NOT invent values. Omit fields that are not stated in the document.
-- selfAdminAllowed: If the document contains a "Site of Care" section, table, or any text restricting where the drug may be administered, extract the restriction as one of: "infusion_center_only" (must be given at infusion center/hospital outpatient), "home_infusion_allowed" (may be given at home), "office_only" (physician office only). Set to null if no site-of-care restriction is mentioned.
+- selfAdminAllowed: if present, extract as one of: "infusion_center_only", "home_infusion_allowed", "office_only". Set to null if no site-of-care restriction is mentioned.
 - Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
 
 Document text:
@@ -190,7 +210,7 @@ Document metadata:
 DOCUMENT STRUCTURE — Aetna CPBs follow this template. Navigate by section name:
 
 STEP 1 — Extract prescriber requirements from the "Prescriber Specialties" section.
-This section contains per-indication specialist mappings, e.g.:
+This section contains per-indication specialist mappings, for example:
   "Crohn's disease: gastroenterologist or colorectal surgeon"
   "Rheumatoid arthritis: rheumatologist"
 Build a lookup: {{ indicationName: prescriberType }}
@@ -200,13 +220,20 @@ Organized as numbered sections by indication.
 
   INDICATION DETECTION: "1. [Indication Name]" marks the beginning of each indication block.
 
-  LOGIC MARKERS (look for italic text or emphasis patterns as signals):
-  - "*all* of the following" → AND
-  - "*any* of the following" → OR (3+ alternatives)
-  - "*either* of the following" → OR (exactly 2 alternatives)
+  LOGIC OPERATOR MAPPING (non-negotiable):
+  "all of the following" → AND
+  "both of the following" → AND
+  "one of the following" → OR
+  "any of the following" → OR
+  "either of the following" → OR
+  If the document uses different phrasing, default to AND unless the text clearly implies alternatives.
 
-  AUTHORIZATION DURATION: Look for "Authorization of [N] months may be granted" — typically \
-  appears as the first sentence within an indication block, before the criteria list.
+  STEP THERAPY SIGNAL PHRASES (exact text to scan for): "inadequate response to", \
+  "failure of", "history of failure", "trial of at least", "must have tried", \
+  "prior treatment with". If NONE of these phrases appear, do NOT create a step_therapy criterion.
+
+  AUTHORIZATION DURATION: Look for "Authorization of [N] months may be granted" — \
+  the first sentence within an indication block, before the criteria list.
 
   STEP THERAPY: Aetna specifies step therapy with dose AND duration together. Example:
   "3-month trial of methotrexate at maximum titrated dose of at least 15 mg per week"
@@ -214,13 +241,15 @@ Organized as numbered sections by indication.
   stepTherapyMinDoseMg (15 mg), stepTherapyDoseFrequency ("per week").
 
 STEP 3 — Extract continuation criteria from the SEPARATE "Continuation of Therapy" section.
-This section is NOT per-indication — it covers all indications with general response \
-documentation requirements.
+
+CONTINUATION CRITERIA SCOPE: The "Continuation of Therapy" section applies to ALL indications equally.
+Copy the SAME reauthorizationCriteria array to every indication record. Do NOT create different
+continuation criteria per indication unless the document explicitly scopes them to a specific indication.
 
 STEP 4 — Extract dosing from the "Dosing" TABLE (if present):
 | Indication | Dose |
-Capture: indicationName, doseMgPerKg, frequency, infusionSchedule (e.g., "at 0, 2, 6 weeks \
-then every 8 weeks")
+Capture: indicationName, doseMgPerKg, frequency, infusionSchedule (for example \
+"at 0, 2, 6 weeks then every 8 weeks")
 
 STEP 5 — Extract excluded indications from "Experimental, Investigational, or Unproven" \
 section. Each listed condition should be extracted as a separate record with \
@@ -230,6 +259,21 @@ STEP 6 — Extract ICD-10 codes from the "Coding" section tables. Match to indic
 
 Pre-extracted ICD-10 mapping (use this to populate indicationICD10 fields):
 {icd10Json}
+
+DRUG NAME NORMALIZATION (always use generic name):
+Remicade → infliximab | Humira → adalimumab | Enbrel → etanercept | Rituxan → rituximab
+Herceptin → trastuzumab | Avastin → bevacizumab | Stelara → ustekinumab | Cosentyx → secukinumab
+Skyrizi → risankizumab | Tremfya → guselkumab | Prolia / Xgeva → denosumab
+Botox → onabotulinumtoxinA | Dysport → abobotulinumtoxinA | Myobloc → rimabotulinumtoxinB
+Xeomin → incobotulinumtoxinA
+
+CONFIDENCE SCORING RUBRIC:
+1.0 — All criteria extracted verbatim, no ambiguity, no cross-references
+0.9 — Minor formatting ambiguity resolved, all values present
+0.8 — One cross-reference to another policy; values inferred from context
+0.7 — Multiple cross-references OR complex nested logic with >3 levels
+0.6 — Criteria text is ambiguous; could be interpreted multiple ways
+<0.6 — Do not use; flag for human review instead
 
 OUTPUT FORMAT:
 Return a valid JSON array of DrugPolicyCriteriaRecord objects:
@@ -283,15 +327,14 @@ Return a valid JSON array of DrugPolicyCriteriaRecord objects:
 }}
 
 CRITICAL RULES:
-- hcpcsCode: Extract the HCPCS/J-code from the 'Coding' section tables. Look for J-codes (e.g. J1234) associated with the drug. Set to null if not found.
-- The Prescriber Specialties section maps per indication — always check this section for \
-  prescriberType, not just the indication criteria blocks.
+- hcpcsCode: Extract the HCPCS/J-code from the 'Coding' section tables. Look for J-codes (for example J1234) associated with the drug. Set to null if not found.
+- rawExcerpt MUST be the verbatim text from the document (max 300 characters). Do NOT paraphrase. If the source text is longer than 300 characters, truncate with "..." at a sentence boundary.
+- For optional fields: use null (not omit, not empty string) when the value is not present in the document. Exception: arrays should be [] when empty, not null.
+- The Prescriber Specialties section maps per indication — always check this section for prescriberType, not just the indication criteria blocks.
 - "either" = OR (binary choice). "any" = OR (multiple choices). Do not conflate these.
 - Aetna's continuation section is GLOBAL, not per-indication. Apply it to all indications.
-- For excluded indications (from "Experimental, Investigational, or Unproven"), create a \
-  record with empty initialAuthCriteria and coveredStatus: "experimental".
-- Do NOT invent values. Omit fields not present in the document.
-- selfAdminAllowed: If the document contains a "Site of Care" section, table, or any text restricting where the drug may be administered, extract the restriction as one of: "infusion_center_only" (must be given at infusion center/hospital outpatient), "home_infusion_allowed" (may be given at home), "office_only" (physician office only). Set to null if no site-of-care restriction is mentioned.
+- For excluded indications (from "Experimental, Investigational, or Unproven"), create a record with empty initialAuthCriteria and coveredStatus: "experimental".
+- selfAdminAllowed: if present, extract as one of: "infusion_center_only", "home_infusion_allowed", "office_only". Set to null if no site-of-care restriction is mentioned.
 - Return ONLY the JSON array. No explanation, no markdown fences, no preamble.
 
 Document text:
@@ -329,7 +372,7 @@ Cigna policies may scope criteria to specific plan types:
   - "Standard Employer Group" / "Employer Group" → default plan tier
   - If NO plan-tier qualifier is present, the criteria apply to ALL plan types → \
     set planTierRestriction to null
-Plan-tier qualifiers typically appear as:
+Plan-tier qualifiers appear as:
   - Section headers: "For Pathwell Specialty Plans:"
   - Inline text: "Applicable to Pathwell Specialty plans only"
   - Footnotes: "*Pathwell Specialty step therapy requirement"
@@ -356,6 +399,22 @@ It uses a NESTED numbered/lettered structure:
   of the following (i and ii):"
   → BRANCH B LOGIC IS "AND"
   → Extract N as maxAuthDurationMonths for reauthorizationCriteria
+
+  BRANCH ISOLATION (critical): Branch A criteria MUST NOT appear in reauthorizationCriteria.
+  Branch B criteria MUST NOT appear in initialAuthCriteria. If you find yourself copying criteria
+  between branches, STOP — you are making an error.
+
+  LOGIC OPERATOR MAPPING (non-negotiable):
+  "all of the following" → AND
+  "both of the following" → AND
+  "one of the following" → OR
+  "any of the following" → OR
+  "either of the following" → OR
+  If the document uses different phrasing, default to AND unless the text clearly implies alternatives.
+
+  STEP THERAPY SIGNAL PHRASES (exact text to scan for): "inadequate response to", \
+  "failure of", "history of failure", "trial of at least", "must have tried", \
+  "prior treatment with". If NONE of these phrases appear, do NOT create a step_therapy criterion.
 
   NESTED CRITERIA:
   Within Branch A, sub-criteria use roman numerals (i, ii, iii) and sometimes further \
@@ -391,6 +450,21 @@ Usually in a table format. Map to indication names.
 
 Pre-extracted ICD-10 mapping (use this to populate indicationICD10 fields):
 {icd10Json}
+
+DRUG NAME NORMALIZATION (always use generic name):
+Remicade → infliximab | Humira → adalimumab | Enbrel → etanercept | Rituxan → rituximab
+Herceptin → trastuzumab | Avastin → bevacizumab | Stelara → ustekinumab | Cosentyx → secukinumab
+Skyrizi → risankizumab | Tremfya → guselkumab | Prolia / Xgeva → denosumab
+Botox → onabotulinumtoxinA | Dysport → abobotulinumtoxinA | Myobloc → rimabotulinumtoxinB
+Xeomin → incobotulinumtoxinA
+
+CONFIDENCE SCORING RUBRIC:
+1.0 — All criteria extracted verbatim, no ambiguity, no cross-references
+0.9 — Minor formatting ambiguity resolved, all values present
+0.8 — One cross-reference to another policy; values inferred from context
+0.7 — Multiple cross-references OR complex nested logic with >3 levels
+0.6 — Criteria text is ambiguous; could be interpreted multiple ways
+<0.6 — Do not use; flag for human review instead
 
 OUTPUT FORMAT:
 Return a valid JSON array of DrugPolicyCriteriaRecord objects:
@@ -440,26 +514,17 @@ Return a valid JSON array of DrugPolicyCriteriaRecord objects:
 }}
 
 CRITICAL RULES:
-- hcpcsCode: Extract the HCPCS/J-code from the 'Coding Information' section. Look for J-codes (e.g. J9264) associated with the drug. Set to null if not found.
-- The "ONE of the following (A or B)" at the top of each indication creates TWO SEPARATE \
-  records: initialAuthCriteria (from Branch A) and reauthorizationCriteria (from Branch B).
-  Never mix Branch A and Branch B criteria.
+- hcpcsCode: Extract the HCPCS/J-code from the 'Coding Information' section. Look for J-codes (for example J9264) associated with the drug. Set to null if not found.
+- rawExcerpt MUST be the verbatim text from the document (max 300 characters). Do NOT paraphrase. If the source text is longer than 300 characters, truncate with "..." at a sentence boundary.
+- For optional fields: use null (not omit, not empty string) when the value is not present in the document. Exception: arrays should be [] when empty, not null.
+- The "ONE of the following (A or B)" at the top of each indication creates TWO SEPARATE records: initialAuthCriteria (from Branch A) and reauthorizationCriteria (from Branch B). Never mix Branch A and Branch B criteria.
 - preferredProducts MUST be left empty — this data comes from the companion PSM document.
-- "Approve for [N] months" appears TWICE per indication — once in Branch A (initial), \
-  once in Branch B (continuation). Extract BOTH.
-- "ONE of the following (a, b, or c)" within Branch A = OR logic. "BOTH of the following" \
-  within Branch A = AND logic. Preserve this in logicOperator.
-- For step therapy, "inadequate response, intolerance, OR contraindication" — all three \
-  are acceptable failure reasons; do not restrict to only "inadequate response".
-- PLAN-TIER SCOPING: If criteria are scoped to specific plan types (e.g., Pathwell \
-  Specialty), set planTierRestriction accordingly. If criteria have NO plan-tier \
-  qualifier, they apply universally — set planTierRestriction to null. A drug with \
-  step therapy ONLY for Pathwell plans should produce a record with \
-  planTierRestriction: "pathwell_specialty" and the step therapy criteria, plus a \
-  separate record with planTierRestriction: null and NO step therapy for standard plans.
-- Ignore the "INSTRUCTIONS FOR USE" boilerplate. It starts with "This Coverage Policy \
-  addresses coverage determinations..." and ends before "OVERVIEW".
-- Do NOT invent values. Return ONLY the JSON array. No explanation, no markdown.
+- "Approve for [N] months" appears TWICE per indication — once in Branch A (initial), once in Branch B (continuation). Extract BOTH.
+- "ONE of the following (a, b, or c)" within Branch A = OR logic. "BOTH of the following" within Branch A = AND logic. Preserve this in logicOperator.
+- For step therapy, "inadequate response, intolerance, OR contraindication" — all three are acceptable failure reasons; do not restrict to only "inadequate response".
+- PLAN-TIER SCOPING: If criteria are scoped to specific plan types (for example Pathwell Specialty), set planTierRestriction accordingly. If criteria have NO plan-tier qualifier, they apply universally — set planTierRestriction to null.
+- Ignore the "INSTRUCTIONS FOR USE" boilerplate. It starts with "This Coverage Policy addresses coverage determinations..." and ends before "OVERVIEW".
+- Return ONLY the JSON array. No explanation, no markdown.
 
 Document text:
 {documentText}"""
@@ -503,10 +568,11 @@ Return a JSON array. These records will be merged into DrugPolicyCriteria record
 matching on drugName + indicationName + hcpcsCode.
 
 CRITICAL RULES:
+- rawExcerpt MUST be the verbatim text from the document (max 300 characters). Do NOT paraphrase. If the source text is longer than 300 characters, truncate with "..." at a sentence boundary.
+- For optional fields: use null (not omit, not empty string) when the value is not present in the document. Exception: arrays should be [] when empty, not null.
 - Extract ONLY drug dosing data. Ignore administrative and boilerplate sections.
-- If a row specifies limits for a drug+indication pair already in the primary drug policy, \
-  this row supersedes the "per FDA labeled dosing" placeholder in the drug policy.
-- If HCPCS unit definition is ambiguous (e.g., "per 10 mg"), state it in unitDefinition.
+- If a row specifies limits for a drug+indication pair already in the primary drug policy, this row supersedes the "per FDA labeled dosing" placeholder in the drug policy.
+- If HCPCS unit definition is ambiguous (for example "per 10 mg"), state it in unitDefinition.
 - Return ONLY the JSON array. No explanation, no markdown.
 
 Document text:
@@ -566,12 +632,12 @@ Extract one record per table row. Use the parent policy's policy number and titl
 Return a JSON array of PolicyDiffRecord objects.
 
 CRITICAL RULES:
+- rawExcerpt MUST be the verbatim text from the document (max 300 characters). Do NOT paraphrase. If the source text is longer than 300 characters, truncate with "..." at a sentence boundary.
+- For optional fields: use null (not omit, not empty string) when the value is not present in the document. Exception: arrays should be [] when empty, not null.
 - Do NOT infer or add clinical criteria — only extract what is stated in the change summary.
-- If the change summary is too vague to classify severity (e.g., "Policy updated"), use \
-  inferredSeverity: "unknown".
+- If the change summary is too vague to classify severity (for example "Policy updated"), use inferredSeverity: "unknown".
 - Normalize drug names to generic: "REMICADE" → "infliximab", "HUMIRA" → "adalimumab".
-- For Cigna bulletins, one policy may have multiple changes in one row — split into \
-  separate records if the summary lists multiple distinct changes.
+- For Cigna bulletins, one policy may have multiple changes in one row — split into separate records if the summary lists multiple distinct changes.
 - Return ONLY the JSON array. No explanation, no markdown.
 
 Document text:
@@ -606,6 +672,26 @@ The table format is:
   | Non-Preferred Products | Exception Criteria |
 Each exception criterion specifies what the patient must demonstrate to access the \
 non-preferred product when preferred products have failed.
+
+STEP THERAPY SIGNAL PHRASES (exact text to scan for): "inadequate response to", \
+"failure of", "history of failure", "trial of at least", "must have tried", \
+"prior treatment with". If NONE of these phrases appear, do NOT create a step_therapy criterion.
+
+LOGIC OPERATOR MAPPING (non-negotiable):
+"all of the following" → AND
+"both of the following" → AND
+"one of the following" → OR
+"any of the following" → OR
+"either of the following" → OR
+If the document uses different phrasing, default to AND unless the text clearly implies alternatives.
+
+CONFIDENCE SCORING RUBRIC:
+1.0 — All criteria extracted verbatim, no ambiguity, no cross-references
+0.9 — Minor formatting ambiguity resolved, all values present
+0.8 — One cross-reference to another policy; values inferred from context
+0.7 — Multiple cross-references OR complex nested logic with >3 levels
+0.6 — Criteria text is ambiguous; could be interpreted multiple ways
+<0.6 — Do not use; flag for human review instead
 
 EXTRACTION OUTPUT:
 {{
@@ -644,23 +730,17 @@ EXTRACTION OUTPUT:
 Return a JSON object (not an array — this is one PSM document, not multiple records).
 
 CRITICAL RULES:
-- Preferred products typically include all approved biosimilars; non-preferred is typically \
-  the reference (originator) product.
-- "hypersensitivity reaction" is a distinct failure reason from "intolerance" — preserve all \
-  three: inadequate response, intolerance, hypersensitivity.
-- The trial duration in PSM documents refers to a trial of the PREFERRED product, not \
-  prior conventional therapy.
-- This output will be merged into DrugPolicyCriteria.preferredProducts for the companion \
-  IP policy. The merge key is companionIpPolicyNumber + drugName.
+- rawExcerpt MUST be the verbatim text from the document (max 300 characters). Do NOT paraphrase. If the source text is longer than 300 characters, truncate with "..." at a sentence boundary.
+- For optional fields: use null (not omit, not empty string) when the value is not present in the document. Exception: arrays should be [] when empty, not null.
+- Preferred products include all approved biosimilars; non-preferred is the reference (originator) product.
+- "hypersensitivity reaction" is a distinct failure reason from "intolerance" — preserve all three: inadequate response, intolerance, hypersensitivity.
+- The trial duration in PSM documents refers to a trial of the PREFERRED product, not prior conventional therapy.
 - Return ONLY the JSON object. No explanation, no markdown.
 
 Document text:
 {documentText}"""
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Prompt A-Multiproduct — UHC Multi-Product Policy (e.g., Botulinum Toxins)
-# ─────────────────────────────────────────────────────────────────────────────
 PROMPT_A_UHC_MULTIPRODUCT = """\
 You are extracting structured medical benefit drug policy criteria from a UnitedHealthcare \
 multi-product policy document. This document covers MULTIPLE distinct products (each with its \
