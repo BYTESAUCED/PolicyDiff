@@ -39,6 +39,8 @@ bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
 if not BEDROCK_MODEL_ID:
     logger.warning(json.dumps({"warning": "missing_env_var", "var": "BEDROCK_MODEL_ID"}))
+
+MAX_DOCUMENT_CHARS = 300_000  # Nova Pro supports 300K token context; ~1.2M chars — fits 200-page PDFs in a single chunk
 # ADR: Biosimilar→generic safety net | catches brand names the LLM misses after prompt normalization
 _BIOSIMILAR_TO_GENERIC: dict[str, str] = {
     # rituximab
