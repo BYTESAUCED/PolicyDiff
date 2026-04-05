@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import {
     CheckCircle2, FileSignature, AlertTriangle, AlertCircle,
     Loader2, Sparkles, Copy, Check
 } from "lucide-react";
-import { useScoreApprovalPath, useGenerateMemo } from "@/hooks/use-api";
+import { useScoreApprovalPath, useGenerateMemo, usePolicies } from "@/hooks/use-api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -39,7 +39,7 @@ const colorMap: Record<StatusColor, {
 
 export default function ApprovalPathPage() {
     // Form state
-    const [drug, setDrug] = useState("Infliximab");
+    const [drug, setDrug] = useState("");
     const [indication, setIndication] = useState("Rheumatoid Arthritis");
     const [icd10, setIcd10] = useState("M05.79");
     const [prescriberSpecialty, setPrescriberSpecialty] = useState("Rheumatologist");
@@ -63,6 +63,14 @@ export default function ApprovalPathPage() {
 
     const scoreMutation = useScoreApprovalPath();
     const memoMutation = useGenerateMemo();
+    const { data: policiesData, isLoading: loadingPolicies } = usePolicies({ limit: 100 });
+
+    const drugList = useMemo(() => {
+        if (!policiesData?.items?.length) return [];
+        const drugs = new Set<string>();
+        policiesData.items.forEach(p => { if (p.drugName) drugs.add(p.drugName); });
+        return Array.from(drugs).sort();
+    }, [policiesData]);
     const generating = scoreMutation.isPending;
     const evaluated = payerScores.length > 0;
 
@@ -155,16 +163,18 @@ export default function ApprovalPathPage() {
                             <p className="text-xs font-medium text-muted-text uppercase tracking-wider">Drug & Indication</p>
                             <div className="space-y-2">
                                 <Label className="text-xs">Drug</Label>
-                                <select
-                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-primary-text outline-none focus:ring-1 focus:ring-primary/50"
-                                    value={drug}
-                                    onChange={e => setDrug(e.target.value)}
-                                >
-                                    <option>Infliximab</option>
-                                    <option>Adalimumab</option>
-                                    <option>Ustekinumab</option>
-                                    <option>Rituximab</option>
-                                </select>
+                                {loadingPolicies ? (
+                                    <div className="h-9 w-full rounded-md border border-input bg-background animate-pulse" />
+                                ) : (
+                                    <select
+                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-primary-text outline-none focus:ring-1 focus:ring-primary/50"
+                                        value={drug}
+                                        onChange={e => setDrug(e.target.value)}
+                                    >
+                                        <option value="">— select a drug —</option>
+                                        {drugList.map(d => <option key={d} value={d}>{d}</option>)}
+                                    </select>
+                                )}
                             </div>
                             <div className="space-y-2">
                                 <Label className="text-xs">Indication</Label>
