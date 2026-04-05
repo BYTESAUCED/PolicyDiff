@@ -69,6 +69,56 @@ def _clean_json_response(text: str) -> str:
     return text
 
 
+def _repair_truncated_json(text: str) -> str:
+    """Attempt to repair a truncated JSON array by closing open structures."""
+    text = text.strip()
+    if not text.startswith("["):
+        return text
+    # Count open braces/brackets to determine what needs closing
+    depth = 0
+    in_string = False
+    escape_next = False
+    last_complete = 0
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                last_complete = i + 1
+        elif ch == "[" and depth == 0:
+            pass
+    # Truncate to last complete object and close the array
+    if last_complete > 0:
+        return text[:last_complete] + "]"
+    return text
+
+
+
+    """Strip markdown fences or preamble from model response."""
+    match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    text = text.strip()
+    if text and text[0] in ("[", "{"):
+        return text
+    for i, ch in enumerate(text):
+        if ch in ("[", "{"):
+            return text[i:]
+    return text
+
+
 def _chunk_document(full_text: str, max_chars: int = MAX_DOCUMENT_CHARS) -> list[str]:
     """Split very long documents into chunks that fit Claude's context."""
     if len(full_text) <= max_chars:
@@ -319,7 +369,11 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
             try:
                 response_text = _invoke_bedrock(prompt)
                 cleaned = _clean_json_response(response_text)
-                parsed = json.loads(cleaned)
+                try:
+                    parsed = json.loads(cleaned)
+                except json.JSONDecodeError:
+                    cleaned = _repair_truncated_json(cleaned)
+                    parsed = json.loads(cleaned)
                 records = parsed if isinstance(parsed, list) else [parsed]
 
                 # Annotate records with chunk-level context
@@ -351,7 +405,11 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
             try:
                 response_text = _invoke_bedrock(prompt)
                 cleaned = _clean_json_response(response_text)
-                parsed = json.loads(cleaned)
+                try:
+                    parsed = json.loads(cleaned)
+                except json.JSONDecodeError:
+                    cleaned = _repair_truncated_json(cleaned)
+                    parsed = json.loads(cleaned)
                 records = parsed if isinstance(parsed, list) else [parsed]
                 all_criteria.extend(records)
 

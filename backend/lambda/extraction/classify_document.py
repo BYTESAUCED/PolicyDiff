@@ -308,11 +308,21 @@ def classify_document(
             "payerStructureNote": "",
         }
 
-    # Unknown payer → generic fallback (skip extraction to avoid garbage)
+    # BCBS NC — general drug/corporate medical policy → use H (table-based criteria)
+    if is_bcbs_nc:
+        return {
+            "documentClass": doc_class,
+            "documentFormat": document_format,
+            "extractionPromptId": "H",
+            "skipExtraction": False,
+            "payerStructureNote": _get_payer_structure_note("H"),
+        }
+
+    # Unknown payer → use generic prompt A as best-effort fallback
     return {
         "documentClass": doc_class,
         "documentFormat": document_format,
-        "extractionPromptId": None,
+        "extractionPromptId": "A",
         "skipExtraction": False,
         "payerStructureNote": "",
     }

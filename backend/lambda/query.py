@@ -34,9 +34,13 @@ DRUG_POLICY_CRITERIA_TABLE = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "")
 POLICY_DOCUMENTS_TABLE = os.environ.get("POLICY_DOCUMENTS_TABLE", "")
 POLICY_DIFFS_TABLE = os.environ.get("POLICY_DIFFS_TABLE", "")
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
+VECTORS_BUCKET_NAME = os.environ.get("VECTORS_BUCKET_NAME", "")
+TITAN_MODEL_ARN = os.environ.get("TITAN_MODEL_ARN", "")
+_INDEX_NAME = "policy-criteria-index"
 
 dynamodb = boto3.resource("dynamodb")
 bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+s3vectors = boto3.client("s3vectors", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 
 # Prompt templates
 QUERY_CLASSIFICATION_AND_SYNTHESIS = """\
@@ -160,72 +164,125 @@ def _get_available_metadata() -> tuple[list[str], list[str]]:
     return sorted(payers), sorted(drugs)
 
 
-def _retrieve_policy_data(query_text: str) -> str:
-    """Retrieve relevant policy data from DynamoDB based on query text.
+def _embed_query(query_text: str) -> list[float]:
+    """Embed the query text using Titan Embeddings v2."""
+    response = bedrock.invoke_model(
+        modelId=TITAN_MODEL_ARN,
+        body=json.dumps({"inputText": query_text}),
+        contentType="application/json",
+        accept="application/json",
+    )
+    return json.loads(response["body"].read())["embedding"]
 
-    Heuristic: scan for drug names and payer names in the query,
-    then fetch matching criteria records.
-    """
+
+def _vector_search(query_text: str, top_k: int = 10) -> list[dict]:
+    """Semantic search via S3 Vectors. Returns list of metadata dicts."""
+    if not VECTORS_BUCKET_NAME or not TITAN_MODEL_ARN:
+        logger.warning("Vector search skipped — VECTORS_BUCKET_NAME or TITAN_MODEL_ARN not set")
+        return []
+    try:
+        embedding = _embed_query(query_text)
+        result = s3vectors.query_vectors(
+            vectorBucketName=VECTORS_BUCKET_NAME,
+            indexName=_INDEX_NAME,
+            queryVector={"float32": embedding},
+            topK=top_k,
+            returnMetadata=True,
+        )
+        return [v.get("metadata", {}) for v in result.get("vectors", [])]
+    except Exception as e:
+        logger.warning(json.dumps({"warning": "vector_search_failed", "detail": str(e)}))
+        return []
+
+
+def _fetch_criteria_by_ids(drug_indication_ids: list[str], policy_doc_ids: list[str]) -> list[dict]:
+    """Fetch full criteria records from DynamoDB for the vector search hits."""
+    if not DRUG_POLICY_CRITERIA_TABLE:
+        return []
+    table = dynamodb.Table(DRUG_POLICY_CRITERIA_TABLE)
+    records: list[dict] = []
+    seen: set[str] = set()
+
+    for policy_doc_id in set(policy_doc_ids):
+        if policy_doc_id in seen:
+            continue
+        seen.add(policy_doc_id)
+        try:
+            result = table.query(
+                KeyConditionExpression=Key("policyDocId").eq(policy_doc_id),
+                Limit=20,
+            )
+            records.extend(result.get("Items", []))
+        except Exception as e:
+            logger.warning(json.dumps({"warning": "criteria_fetch_failed", "policyDocId": policy_doc_id, "detail": str(e)}))
+
+    return records
+
+
+def _retrieve_policy_data(query_text: str) -> str:
+    """RAG retrieval: vector search → fetch full DynamoDB records → return as JSON context."""
+
+    # 1. Try vector search first
+    vector_hits = _vector_search(query_text, top_k=15)
+
+    if vector_hits:
+        logger.info(json.dumps({"action": "vector_search_hits", "count": len(vector_hits)}))
+        policy_doc_ids = [h.get("policyDocId", "") for h in vector_hits if h.get("policyDocId")]
+        drug_indication_ids = [h.get("drugIndicationId", "") for h in vector_hits if h.get("drugIndicationId")]
+        records = _fetch_criteria_by_ids(drug_indication_ids, policy_doc_ids)
+        if records:
+            return json.dumps(records[:20], default=str)
+
+    # 2. Fallback: keyword-based DynamoDB scan
+    logger.info("Vector search returned no results, falling back to keyword scan")
     criteria_table = dynamodb.Table(DRUG_POLICY_CRITERIA_TABLE)
 
-    # Known drug names to look for in queries
     common_drugs = [
-        "infliximab", "adalimumab", "ustekinumab", "rituximab",
-        "remicade", "inflectra", "avsola", "renflexis", "humira",
-        "stelara", "rituxan",
+        "infliximab", "adalimumab", "ustekinumab", "rituximab", "bevacizumab",
+        "denosumab", "botulinum", "botox", "dysport", "xeomin",
+        "remicade", "inflectra", "avsola", "humira", "stelara", "rituxan",
     ]
-    common_payers = [
-        "unitedhealth", "uhc", "united", "aetna", "cigna", "anthem",
-    ]
+    common_payers = ["unitedhealth", "uhc", "united", "aetna", "cigna", "emblemhealth", "florida blue", "bcbs"]
 
     query_lower = query_text.lower()
-
-    # Find mentioned drugs
     mentioned_drugs = [d for d in common_drugs if d in query_lower]
-
-    # Find mentioned payers
     mentioned_payers = [p for p in common_payers if p in query_lower]
 
     all_records: list[dict] = []
 
-    # Fetch by drug name using GSI
     for drug in mentioned_drugs:
-        # Normalize to generic name
         drug_map = {
-            "remicade": "infliximab", "inflectra": "infliximab",
-            "avsola": "infliximab", "renflexis": "infliximab",
-            "humira": "adalimumab", "stelara": "ustekinumab",
-            "rituxan": "rituximab",
+            "remicade": "infliximab", "inflectra": "infliximab", "avsola": "infliximab",
+            "humira": "adalimumab", "stelara": "ustekinumab", "rituxan": "rituximab",
+            "botox": "onabotulinumtoxinA", "dysport": "abobotulinumtoxinA", "xeomin": "incobotulinumtoxinA",
         }
         generic = drug_map.get(drug, drug)
-
         try:
             result = criteria_table.query(
                 IndexName="drugName-payerName-index",
                 KeyConditionExpression=Key("drugName").eq(generic),
-                Limit=50,
+                Limit=30,
             )
             all_records.extend(result.get("Items", []))
         except Exception as e:
             logger.warning(json.dumps({"warning": "criteria_query_failed", "drug": generic, "detail": str(e)}))
 
-    # If no drug-specific results, do a broad scan
     if not all_records:
         try:
-            result = criteria_table.scan(Limit=50)
+            result = criteria_table.scan(Limit=30)
             all_records = result.get("Items", [])
         except Exception as e:
             logger.warning(json.dumps({"warning": "criteria_scan_failed", "detail": str(e)}))
 
-    # Filter by mentioned payers if applicable
     if mentioned_payers:
         payer_map = {
-            "unitedhealth": "UnitedHealthcare", "uhc": "UnitedHealthcare",
-            "united": "UnitedHealthcare", "aetna": "Aetna",
-            "cigna": "Cigna", "anthem": "Anthem",
+            "unitedhealth": "UnitedHealthcare", "uhc": "UnitedHealthcare", "united": "UnitedHealthcare",
+            "aetna": "Aetna", "cigna": "Cigna", "emblemhealth": "EmblemHealth",
+            "florida blue": "Florida Blue", "bcbs": "BCBS NC",
         }
         target_payers = {payer_map.get(p, p) for p in mentioned_payers}
-        all_records = [r for r in all_records if r.get("payerName") in target_payers] or all_records
+        filtered = [r for r in all_records if r.get("payerName") in target_payers]
+        all_records = filtered or all_records
 
     return json.dumps(all_records[:20], default=str)
 

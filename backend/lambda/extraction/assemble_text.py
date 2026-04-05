@@ -593,7 +593,7 @@ def _extract_tables_from_blocks(blocks: list[dict]) -> list[dict]:
             continue
 
         table: dict[str, Any] = {"rows": {}}
-        for rel in block.get("Relationships", []):
+        for rel in (block.get("Relationships") or []):
             if rel["Type"] != "CHILD":
                 continue
             for child_id in rel["Ids"]:
@@ -604,7 +604,7 @@ def _extract_tables_from_blocks(blocks: list[dict]) -> list[dict]:
                 col_idx = cell.get("ColumnIndex", 0)
 
                 cell_text_parts: list[str] = []
-                for crel in cell.get("Relationships", []):
+                for crel in (cell.get("Relationships") or []):
                     if crel["Type"] != "CHILD":
                         continue
                     for wid in crel["Ids"]:
@@ -642,7 +642,7 @@ def _extract_kv_pairs_from_blocks(blocks: list[dict]) -> list[dict]:
 
         key_text = _get_text_from_relations(block, block_map)
         value_text = ""
-        for rel in block.get("Relationships", []):
+        for rel in (block.get("Relationships") or []):
             if rel["Type"] == "VALUE":
                 for vid in rel["Ids"]:
                     vblock = block_map.get(vid)
@@ -657,7 +657,7 @@ def _extract_kv_pairs_from_blocks(blocks: list[dict]) -> list[dict]:
 
 def _get_text_from_relations(block: dict, block_map: dict) -> str:
     parts: list[str] = []
-    for rel in block.get("Relationships", []):
+    for rel in (block.get("Relationships") or []):
         if rel["Type"] != "CHILD":
             continue
         for cid in rel["Ids"]:

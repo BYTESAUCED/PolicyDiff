@@ -17,6 +17,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -42,6 +43,13 @@ ROLE_CLAIM = "https://policydiff.com/role"
 REQUIRED_CREATE_FIELDS = ["payerName", "planType", "documentTitle", "effectiveDate", "policyDocId"]
 
 
+def _json_default(obj: Any) -> Any:
+    """JSON serializer for DynamoDB Decimal types."""
+    if isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+
 def create_response(status_code: int, body: dict) -> dict:
     return {
         "statusCode": status_code,
@@ -51,7 +59,7 @@ def create_response(status_code: int, body: dict) -> dict:
             "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
             "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
         },
-        "body": json.dumps(body),
+        "body": json.dumps(body, default=_json_default),
     }
 
 
