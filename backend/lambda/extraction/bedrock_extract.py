@@ -58,6 +58,20 @@ def _invoke_bedrock(prompt: str, max_tokens: int = 8192) -> str:
     return result["output"]["message"]["content"][0]["text"]
 
 
+def _clean_json_response(text: str) -> str:
+    """Strip markdown fences or preamble from model response."""
+    match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    text = text.strip()
+    if text and text[0] in ("[", "{"):
+        return text
+    for i, ch in enumerate(text):
+        if ch in ("[", "{"):
+            return text[i:]
+    return text
+
+
 def _repair_truncated_json(text: str) -> str:
     """Attempt to repair a truncated JSON array by closing open structures."""
     text = text.strip()
