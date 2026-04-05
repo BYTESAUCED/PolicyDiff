@@ -93,6 +93,13 @@ def _parse_key(key: str) -> tuple[str, str]:
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Embed rawExcerpt text chunks and write vectors to S3 Vectors."""
+    if isinstance(event, str):
+        try:
+            event = json.loads(event)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"event is a string and could not be parsed as JSON: {exc}") from exc
+    if not isinstance(event, dict):
+        raise TypeError(f"Expected event to be a dict, got {type(event).__name__}")
     policy_doc_id = event.get("policyDocId", "unknown")
     logger.info(json.dumps({"state": "EmbedAndIndex", "policyDocId": policy_doc_id}))
 

@@ -237,6 +237,13 @@ _CHUNKED_PROMPT_IDS = {"A", "A_MULTIPRODUCT", "B", "C", "C_3PHASE", "G", "H", "B
 
 def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     """Extract DrugPolicyCriteria records from structured policy text via Bedrock."""
+    if isinstance(event, str):
+        try:
+            event = json.loads(event)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"event is a string and could not be parsed as JSON: {exc}") from exc
+    if not isinstance(event, dict):
+        raise TypeError(f"Expected event to be a dict, got {type(event).__name__}")
     logger.info(json.dumps({
         "state": "BedrockSchemaExtraction",
         "policyDocId": event.get("policyDocId"),

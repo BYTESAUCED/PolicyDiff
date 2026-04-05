@@ -206,6 +206,13 @@ def _write_excerpt_files(policy_doc_id: str, criteria: list[dict], bucket: str) 
 
 def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     """Batch write extracted criteria to DynamoDB and update policy status."""
+    if isinstance(event, str):
+        try:
+            event = json.loads(event)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"event is a string and could not be parsed as JSON: {exc}") from exc
+    if not isinstance(event, dict):
+        raise TypeError(f"Expected event to be a dict, got {type(event).__name__}")
     logger.info(json.dumps({"state": "WriteToDynamoDB", "policyDocId": event.get("policyDocId")}))
 
     policy_doc_id: str = event["policyDocId"]

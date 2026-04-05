@@ -30,6 +30,13 @@ lambda_client = boto3.client("lambda")
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Trigger temporal diff if a previous version of this policy exists."""
+    if isinstance(event, str):
+        try:
+            event = json.loads(event)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"event is a string and could not be parsed as JSON: {exc}") from exc
+    if not isinstance(event, dict):
+        raise TypeError(f"Expected event to be a dict, got {type(event).__name__}")
     logger.info(json.dumps({"state": "TriggerDiffIfVersionExists", "policyDocId": event.get("policyDocId")}))
 
     policy_doc_id: str = event["policyDocId"]
