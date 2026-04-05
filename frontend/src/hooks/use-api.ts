@@ -323,3 +323,25 @@ export function useGenerateMemo() {
       }),
   });
 }
+
+export interface DiscordanceSummary {
+  drugName: string;
+  payerName: string;
+  discordanceScore: number | null;
+  summary: string;
+  changesCount?: number;
+  status?: string;
+  generatedAt?: string;
+}
+
+export function useDiscordances() {
+  return useQuery({
+    queryKey: ["discordances"],
+    queryFn: () =>
+      apiFetch<{ items: DiscordanceSummary[]; count: number }>(
+        "api/discordance"
+      ),
+    retry: shouldRetry,
+    staleTime: 30_000,
+  });
+}
