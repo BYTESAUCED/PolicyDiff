@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-    LayoutDashboard, UploadCloud, Search, TableProperties, Activity, MessageSquare, AlertTriangle, FileCheck, PanelLeftClose, PanelRightClose, LogIn, LogOut
+    LayoutDashboard, UploadCloud, Search, TableProperties, Activity, MessageSquare, FileCheck, PanelLeftClose, PanelRightClose, LogIn, LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -16,8 +16,7 @@ const routes = [
     { label: "Comparison Matrix", href: "/compare", icon: TableProperties, iconClassName: "text-[#ea580c]" },
     { label: "Change Feed", href: "/diffs", icon: Activity, iconClassName: "text-[#10b981]" },
     { label: "Query Interface", href: "/query", icon: MessageSquare, iconClassName: "text-[#2563eb]" },
-    { label: "Discordance Alerts", href: "/discordance", icon: AlertTriangle, iconClassName: "text-[#dc2626]" },
-    { label: "Approval Path", href: "/approval-path", icon: FileCheck, iconClassName: "text-[#16a34a]" },
+{ label: "Approval Path", href: "/approval-path", icon: FileCheck, iconClassName: "text-[#16a34a]" },
 ];
 
 export function AppSidebar() {

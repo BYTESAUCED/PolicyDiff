@@ -5,12 +5,12 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
     Search, ArrowRight, BookMarked, TableProperties,
-    Pill, FileText, Calendar
+    Pill, FileText, Calendar, BookmarkPlus, BookmarkCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useDiffsFeed, usePolicies, useUserPreferences, useRecentQueries } from "@/hooks/use-api";
+import { useDiffsFeed, usePolicies, useUserPreferences, useUpdatePreferences, useRecentQueries } from "@/hooks/use-api";
 
 // ── Search helpers ────────────────────────────────────────────────────────────
 
@@ -44,6 +44,14 @@ function severityToType(severity: string): "Clinical" | "Cosmetic" {
 function relativeTime(iso: string): string {
     if (!iso) return "";
     const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 0) {
+        const absDiff = Math.abs(diff);
+        const days = Math.floor(absDiff / 86400000);
+        if (days === 0) return "today";
+        if (days === 1) return "in 1 day";
+        if (days < 7) return `in ${days} days`;
+        return `in ${Math.floor(days / 7)} week${Math.floor(days / 7) > 1 ? "s" : ""}`;
+    }
     const mins = Math.floor(diff / 60000);
     if (mins < 60) return `${mins} min ago`;
     const hrs = Math.floor(mins / 60);
@@ -66,6 +74,7 @@ export default function DashboardPage() {
     const { data: policiesData, isLoading: loadingPolicies } = usePolicies({ limit: 50 });
     const { data: prefsData } = useUserPreferences();
     const { data: queriesData, isLoading: loadingQueries } = useRecentQueries(5);
+    const updatePreferences = useUpdatePreferences();
 
     const loading = loadingFeed || loadingPolicies;
 
@@ -73,40 +82,51 @@ export default function DashboardPage() {
     const recentChanges = feedData?.feed ?? [];
 
     // Derive stats
-    const trackingCount = policiesData?.items?.length
-        ? new Set(policiesData.items.map((p) => p.drugName).filter(Boolean)).size
-        : 0;
+    const trackingCount = prefsData?.watchedDrugs?.length ?? 0;
     const changesThisWeek = recentChanges.filter(c => {
         if (!c.generatedAt) return false;
         return Date.now() - new Date(c.generatedAt).getTime() < 7 * 24 * 60 * 60 * 1000;
     }).length;
     const actionableAlerts = recentChanges.filter(c => c.severity === "breaking").length;
 
-    // Watched drugs from preferences or derive from policies
-    const watchedDrugs = prefsData?.watchedDrugs?.length
-        ? prefsData.watchedDrugs.map((name: string) => ({ name, payers: [] as string[], updatedPayers: 0, lastUpdate: "" }))
-        : policiesData?.items?.length
-            ? (() => {
-                const grouped = new Map<string, { payers: Set<string>; latest: string }>();
-                policiesData.items.forEach(p => {
-                    if (!p.drugName) return;
-                    if (!grouped.has(p.drugName)) grouped.set(p.drugName, { payers: new Set(), latest: "" });
-                    const g = grouped.get(p.drugName)!;
-                    if (p.payerName) g.payers.add(p.payerName);
-                    if (p.effectiveDate && p.effectiveDate > g.latest) g.latest = p.effectiveDate;
-                });
-                return Array.from(grouped.entries()).slice(0, 3).map(([name, data]) => ({
-                    name,
-                    payers: Array.from(data.payers),
-                    updatedPayers: 0,
-                    lastUpdate: data.latest ? relativeTime(data.latest) : "",
-                }));
-            })()
-            : [];
+    // Build drug→payer map from policies for enriching watched drugs
+    const drugPoliciesMap = useMemo(() => {
+        const map = new Map<string, { payers: string[]; latest: string }>();
+        policiesData?.items?.forEach(p => {
+            if (!p.drugName) return;
+            if (!map.has(p.drugName)) map.set(p.drugName, { payers: [], latest: "" });
+            const entry = map.get(p.drugName)!;
+            if (p.payerName && !entry.payers.includes(p.payerName)) entry.payers.push(p.payerName);
+            if (p.effectiveDate && p.effectiveDate > entry.latest) entry.latest = p.effectiveDate;
+        });
+        return map;
+    }, [policiesData]);
+
+    // Watched drugs come exclusively from user preferences, filtered to only those with an uploaded policy
+    const watchedDrugs = (prefsData?.watchedDrugs ?? [])
+        .filter((name: string) => drugPoliciesMap.has(name))
+        .map((name: string) => {
+            const pd = drugPoliciesMap.get(name)!;
+            return { name, payers: pd.payers, updatedPayers: 0, lastUpdate: pd.latest ? relativeTime(pd.latest) : "" };
+        });
 
     const [query, setQuery] = useState("");
     const [open, setOpen] = useState(false);
     const searchRef = useRef<HTMLDivElement>(null);
+
+    const watchedSet = new Set<string>(prefsData?.watchedDrugs ?? []);
+
+    function handleTrackDrug(drugName: string) {
+        const current = prefsData?.watchedDrugs ?? [];
+        const alreadyWatched = current.includes(drugName);
+        const newList = alreadyWatched
+            ? current.filter((d: string) => d !== drugName)
+            : [...current, drugName];
+        updatePreferences.mutate({
+            watchedDrugs: newList,
+            watchedPayers: prefsData?.watchedPayers ?? [],
+        });
+    }
 
     // Build live drug list from real policy data
     const drugSearchList: DrugSearchEntry[] = useMemo(() => {
@@ -230,6 +250,18 @@ export default function DashboardPage() {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1.5 shrink-0 ml-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className={cn("h-7 text-xs gap-1 cursor-pointer", watchedSet.has(drug.name) && "text-primary")}
+                                            onClick={(e) => { e.stopPropagation(); handleTrackDrug(drug.name); }}
+                                            disabled={updatePreferences.isPending}
+                                        >
+                                            {watchedSet.has(drug.name)
+                                                ? <><BookmarkCheck className="h-3 w-3" /> Watching</>
+                                                : <><BookmarkPlus className="h-3 w-3" /> Track</>
+                                            }
+                                        </Button>
                                         <Link href={`/compare?drug=${drug.name.toLowerCase()}`} onClick={() => setOpen(false)}>
                                             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 cursor-pointer">
                                                 <TableProperties className="h-3 w-3" /> Compare
@@ -280,16 +312,15 @@ export default function DashboardPage() {
                     </div>
                 ) : watchedDrugs.length === 0 ? (
                     <div className="rounded-lg border border-dashed border-border px-6 py-8 text-center text-sm text-muted-foreground">
-                        No watched drugs yet. Upload policies to see tracked drugs here.
+                        No watched drugs yet. Search for a drug above and click <strong>Track</strong> to add it here.
                     </div>
                 ) : (
                     <div className="grid grid-cols-3 border border-border dark:border-white/10 rounded-lg divide-x divide-border dark:divide-white/10 bg-transparent">
                         {watchedDrugs.slice(0, 3).map((drug, index) => (
-                            <Link
+                            <div
                                 key={drug.name}
-                                href="/explorer"
                                 className={cn(
-                                    "block group cursor-pointer px-5 py-5 transition-colors",
+                                    "group relative px-5 py-5 transition-colors",
                                     watchedDrugBlockClasses[index % watchedDrugBlockClasses.length],
                                 )}
                             >
@@ -297,13 +328,15 @@ export default function DashboardPage() {
                                     <div className="flex items-start justify-between gap-2">
                                         <div className="flex items-center gap-1.5">
                                             <Pill className="h-4 w-4 text-primary shrink-0" />
-                                            <span className="text-sm font-semibold tracking-tight group-hover:text-primary transition-colors">{drug.name}</span>
+                                            <span className="text-sm font-semibold tracking-tight">{drug.name}</span>
                                         </div>
-                                        {(drug.updatedPayers ?? 0) > 0 && (
-                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800 shrink-0 whitespace-nowrap">
-                                                {drug.updatedPayers} updated
-                                            </span>
-                                        )}
+                                        <button
+                                            onClick={() => handleTrackDrug(drug.name)}
+                                            disabled={updatePreferences.isPending}
+                                            className="opacity-0 group-hover:opacity-100 transition-opacity text-xs font-medium px-3 py-1 rounded border border-border text-muted-foreground hover:border-red-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 dark:hover:border-red-800 dark:hover:text-red-400 shrink-0 cursor-pointer"
+                                        >
+                                            Untrack
+                                        </button>
                                     </div>
                                     {drug.payers.length > 0 && (
                                         <div className="flex flex-wrap gap-1.5">
@@ -318,7 +351,7 @@ export default function DashboardPage() {
                                         <p className="text-xs text-muted-foreground/70">Last change {drug.lastUpdate}</p>
                                     )}
                                 </div>
-                            </Link>
+                            </div>
                         ))}
                     </div>
                 )}
@@ -395,16 +428,9 @@ export default function DashboardPage() {
 
                 {/* Recent Queries */}
                 <section className="col-span-3 space-y-5">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <div className="w-1 h-3.5 rounded-full bg-primary" />
-                            <h2 className="text-xs font-bold uppercase tracking-widest text-foreground">Recent Queries</h2>
-                        </div>
-                        <Link href="/query">
-                            <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground gap-1 cursor-pointer">
-                                <TableProperties className="h-3 w-3" /> New
-                            </Button>
-                        </Link>
+                    <div className="flex items-center gap-2">
+                        <div className="w-1 h-3.5 rounded-full bg-primary" />
+                        <h2 className="text-xs font-bold uppercase tracking-widest text-foreground">Recent Queries</h2>
                     </div>
                     {loadingQueries ? (
                         <div className="space-y-3">
@@ -422,12 +448,11 @@ export default function DashboardPage() {
                     ) : (
                         <div className="space-y-2">
                             {queriesData.queries.slice(0, 5).map((q) => (
-                                <Link
+                                <div
                                     key={q.queryId}
-                                    href="/query"
-                                    className="block group px-4 py-3 rounded-lg border border-border hover:bg-muted/20 transition-colors cursor-pointer"
+                                    className="px-4 py-3 rounded-lg border border-border"
                                 >
-                                    <p className="text-sm text-foreground group-hover:text-primary transition-colors line-clamp-1">{q.queryText}</p>
+                                    <p className="text-sm text-foreground line-clamp-1">{q.queryText}</p>
                                     <div className="flex items-center gap-2 mt-1">
                                         <span className="text-[10px] font-mono text-muted-foreground/60">{q.queryType}</span>
                                         {q.createdAt && (
@@ -437,7 +462,7 @@ export default function DashboardPage() {
                                             </>
                                         )}
                                     </div>
-                                </Link>
+                                </div>
                             ))}
                         </div>
                     )}

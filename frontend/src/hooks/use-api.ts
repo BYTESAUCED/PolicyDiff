@@ -89,23 +89,6 @@ export interface QueryResult {
   responseTimeMs: number;
 }
 
-export interface DiscordanceSummary {
-  diffId?: string;
-  drugName: string;
-  payerName: string;
-  discordanceScore: number | null;
-  summary: string;
-  changesCount?: number;
-  changes?: {
-    dimension: string;
-    medicalValue: string;
-    pharmacyValue: string;
-    moreRestrictive: string;
-    severity: string;
-  }[];
-  status?: string;
-}
-
 export interface PayerScore {
   payerName: string;
   score: number;
@@ -230,27 +213,6 @@ export function useCompare(
   });
 }
 
-export function useDiscordances() {
-  return useQuery({
-    queryKey: ["discordances"],
-    queryFn: () =>
-      apiFetch<{ items: DiscordanceSummary[]; count: number }>(
-        "api/discordance"
-      ),
-    retry: shouldRetry,
-    staleTime: 30_000,
-  });
-}
-
-export function useDiscordanceDetail(drug: string, payer: string) {
-  return useQuery({
-    queryKey: ["discordance-detail", drug, payer],
-    queryFn: () =>
-      apiFetch<DiscordanceSummary>(`api/discordance/${drug}/${payer}`),
-    enabled: !!drug && !!payer,
-  });
-}
-
 export function useUserPreferences() {
   return useQuery({
     queryKey: ["user-preferences"],
@@ -261,6 +223,20 @@ export function useUserPreferences() {
         watchedPayers: string[];
       }>("api/users/me/preferences"),
     retry: shouldRetry,
+  });
+}
+
+export function useUpdatePreferences() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (prefs: { watchedDrugs: string[]; watchedPayers: string[] }) =>
+      apiFetch("api/users/me/preferences", {
+        method: "PUT",
+        body: JSON.stringify(prefs),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["user-preferences"] });
+    },
   });
 }
 
