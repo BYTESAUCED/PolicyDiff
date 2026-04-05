@@ -69,9 +69,13 @@ def create_response(status_code: int, body: dict) -> dict:
 
 def get_caller_claims(event: dict) -> dict:
     try:
-        return event["requestContext"]["authorizer"]["jwt"]["claims"]
+        claims = event["requestContext"]["authorizer"]["jwt"]["claims"]
+        if claims:
+            return claims
     except (KeyError, TypeError):
-        return {}
+        pass
+    # ADR: No JWT authorizer in demo/hackathon mode — return a fixed demo identity
+    return {"sub": "demo-user"}
 
 
 def require_admin(event: dict) -> bool:
