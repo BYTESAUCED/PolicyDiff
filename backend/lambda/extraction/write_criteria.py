@@ -226,7 +226,7 @@ def _build_excerpt(record: dict) -> str:
     return "\n".join(p for p in parts if p)
 
 
-
+def _write_excerpt_files(policy_doc_id: str, criteria: list[dict], bucket: str) -> list[str]:
     """Write per-criteria rawExcerpt text files to S3 for embed_and_index.
 
     Key format: {policyDocId}/excerpts/{drugIndicationId}.txt
