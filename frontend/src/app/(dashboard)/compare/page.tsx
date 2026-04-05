@@ -220,7 +220,7 @@ function DimensionDetailPanel({
 
 export default function ComparisonMatrixPage() {
     const searchParams = useSearchParams();
-    const initialDrug = searchParams.get("drug") ?? "infliximab";
+    const initialDrug = searchParams.get("drug") ?? "";
 
     const [selectedDrug, setSelectedDrug] = useState(initialDrug);
     const [selectedIndication, setSelectedIndication] = useState("");
@@ -359,15 +359,8 @@ export default function ComparisonMatrixPage() {
                                 value={selectedDrug}
                                 onChange={(e) => setSelectedDrug(e.target.value)}
                             >
-                                {drugList.length > 0 ? (
-                                    drugList.map(d => <option key={d} value={d}>{d}</option>)
-                                ) : (
-                                    <>
-                                        <option value="infliximab">infliximab</option>
-                                        <option value="adalimumab">adalimumab</option>
-                                        <option value="ustekinumab">ustekinumab</option>
-                                    </>
-                                )}
+                                <option value="">— pick a drug —</option>
+                                {drugList.map(d => <option key={d} value={d}>{d}</option>)}
                             </select>
                         )}
                     </div>
