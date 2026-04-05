@@ -320,6 +320,21 @@ STEP 2 — From the "OVERVIEW" section, extract:
 - All FDA-approved indications (bulleted list)
 - All product names (brand and biosimilar) listed in the policy title and overview
 
+STEP 2.5 — PLAN-TIER DETECTION (CRITICAL):
+BEFORE parsing criteria, scan the Coverage Policy section for plan-tier qualifiers. \
+Cigna policies may scope criteria to specific plan types:
+  - "Pathwell Specialty" / "Pathwell" → step therapy or additional restrictions apply \
+    ONLY to Pathwell Specialty plans, NOT to standard employer group plans
+  - "Open Access Plus" / "OAP" → criteria apply only to OAP plans
+  - "Standard Employer Group" / "Employer Group" → default plan tier
+  - If NO plan-tier qualifier is present, the criteria apply to ALL plan types → \
+    set planTierRestriction to null
+Plan-tier qualifiers typically appear as:
+  - Section headers: "For Pathwell Specialty Plans:"
+  - Inline text: "Applicable to Pathwell Specialty plans only"
+  - Footnotes: "*Pathwell Specialty step therapy requirement"
+Extract the plan-tier restriction as planTierRestriction on each record.
+
 STEP 3 — Parse the "Coverage Policy" section — this is the core extraction target.
 It uses a NESTED numbered/lettered structure:
 
@@ -359,6 +374,12 @@ It uses a NESTED numbered/lettered structure:
     count as valid prior drug failure outcomes
   - "minimum [N]-month trial" → trialDurationWeeks = N * 4
   - "at therapeutic dose" → note in criterionText
+
+  PLAN-TIER-SCOPED STEP THERAPY:
+  - If step therapy criteria appear under a Pathwell section header, set \
+    planTierRestriction: "pathwell_specialty" on those criteria records
+  - If the same indication has criteria outside the Pathwell section (applying to \
+    standard employer plans), extract SEPARATE records with planTierRestriction: null
 
   APPROVAL DURATIONS:
   - Initial (Branch A): "Approve for [N] months if..." → initialAuthDurationMonths
@@ -410,6 +431,7 @@ Return a valid JSON array of DrugPolicyCriteriaRecord objects:
       "rawExcerpt": string
     }}
   ],
+  "planTierRestriction": "pathwell_specialty" | "open_access_plus" | null,
   "dosingLimits": null,
   "combinationRestrictions": [],
   "benefitType": "medical",
@@ -429,6 +451,12 @@ CRITICAL RULES:
   within Branch A = AND logic. Preserve this in logicOperator.
 - For step therapy, "inadequate response, intolerance, OR contraindication" — all three \
   are acceptable failure reasons; do not restrict to only "inadequate response".
+- PLAN-TIER SCOPING: If criteria are scoped to specific plan types (e.g., Pathwell \
+  Specialty), set planTierRestriction accordingly. If criteria have NO plan-tier \
+  qualifier, they apply universally — set planTierRestriction to null. A drug with \
+  step therapy ONLY for Pathwell plans should produce a record with \
+  planTierRestriction: "pathwell_specialty" and the step therapy criteria, plus a \
+  separate record with planTierRestriction: null and NO step therapy for standard plans.
 - Ignore the "INSTRUCTIONS FOR USE" boilerplate. It starts with "This Coverage Policy \
   addresses coverage determinations..." and ends before "OVERVIEW".
 - Do NOT invent values. Return ONLY the JSON array. No explanation, no markdown.
@@ -784,6 +812,14 @@ PHASE STRUCTURE per indication:
 
 STEP 1 — IGNORE "INSTRUCTIONS FOR USE" boilerplate at document start.
 
+STEP 1.5 — PLAN-TIER DETECTION:
+Scan the Coverage Policy section for plan-tier qualifiers before extracting criteria:
+  - "Pathwell Specialty" / "Pathwell" → criteria apply ONLY to Pathwell Specialty plans
+  - "Open Access Plus" / "OAP" → criteria apply only to OAP plans
+  - If NO plan-tier qualifier is present, criteria apply to ALL plan types → \
+    set planTierRestriction to null
+Extract planTierRestriction on each record.
+
 STEP 2 — Parse each numbered indication: "1. Rheumatoid Arthritis (RA)"
 
 STEP 3 — Within each indication, find Phase A, B, and C sub-sections.
@@ -840,6 +876,7 @@ One element per indication + phase (3 records per indication):
       "maxDoseMg": number | null
     }}
   ],
+  "planTierRestriction": "pathwell_specialty" | "open_access_plus" | null,
   "dosingLimits": null,
   "combinationRestrictions": [],
   "benefitType": "medical",
@@ -1178,10 +1215,40 @@ Document metadata:
 - Structure Note: {payerStructureNote}
 
 DOCUMENT STRUCTURE:
-- Drug class sections (e.g., bevacizumab agents, rituximab agents, trastuzumab agents)
-- Within each drug class: preferred products table and non-preferred products table
-- Step therapy is PRODUCT-TIER-BASED: non-preferred product requires trial/failure of preferred product
-- Documentation requirements for non-preferred exception access
+This document contains MULTIPLE drug class sections. Each drug class has its OWN \
+preferred products and non-preferred products. You MUST isolate extraction to the \
+specific drug class section you are processing.
+
+STEP 1 — DRUG CLASS SECTION BOUNDARY DETECTION:
+Identify drug class section headers in the document. They follow patterns like:
+  - "[Drug Name] Agents" (e.g., "Bevacizumab Agents", "Rituximab Agents")
+  - "[Drug Class]" as a standalone section header
+  - Bold or capitalized drug class names followed by product tables
+Each drug class section ENDS where the next drug class section header begins, \
+or at the end of the document.
+
+STEP 2 — WITHIN EACH DRUG CLASS SECTION:
+  - Extract ONLY the preferred products listed IN THAT SECTION
+  - Extract ONLY the non-preferred products listed IN THAT SECTION
+  - Extract ONLY the exception criteria listed IN THAT SECTION
+  - Step therapy is PRODUCT-TIER-BASED: non-preferred product requires \
+    trial/failure of the preferred product FROM THE SAME DRUG CLASS
+
+STEP 3 — KNOWN BIOSIMILAR FAMILIES (use to verify correct assignment):
+  - bevacizumab biosimilars: Mvasi, Zirabev, Avastin (reference)
+  - rituximab biosimilars: Riabni, Ruxience, Truxima, Rituxan (reference), \
+    Rituxan Hycela (rituximab and hyaluronidase)
+  - trastuzumab biosimilars: Ogivri, Herzuma, Ontruzant, Trazimera, Kanjinti, \
+    Herceptin (reference), Herceptin Hylecta
+  NEVER assign a biosimilar from one family to a different drug class record. \
+  If you see Mvasi or Zirabev, they belong to bevacizumab ONLY. \
+  If you see Riabni, Ruxience, or Truxima, they belong to rituximab ONLY.
+
+STEP 4 — REFERENCED DOCUMENTS:
+If the policy text references external documents for per-indication criteria \
+(e.g., "see Table 1", "refer to [Policy Name]", "criteria in [document]"), \
+extract these references. These indicate that full clinical criteria live in a \
+separate linked policy document.
 
 EXTRACTION TASK — For each drug class, extract ONE preferred product program record:
 {{
@@ -1219,6 +1286,12 @@ EXTRACTION TASK — For each drug class, extract ONE preferred product program r
       ]
     }}
   ],
+  "referencedDocuments": [
+    {{
+      "documentTitle": string,
+      "referenceText": string
+    }}
+  ],
   "documentationRequirements": [string],
   "stepTherapySummary": string,
   "documentClass": "preferred_specialty_mgmt"
@@ -1226,9 +1299,16 @@ EXTRACTION TASK — For each drug class, extract ONE preferred product program r
 
 CRITICAL RULES:
 - FDA Approved Use sections = reference only. Do NOT extract as criteria.
-- Step therapy is product-tier: preferred must be tried before non-preferred.
-- documentationRequirements = prescriber attestations, medical records, or clinical notes required \
-  when requesting non-preferred product exception.
+- DRUG CLASS ISOLATION: Each record's preferredProducts and nonPreferredProducts MUST \
+  come from the SAME drug class section. NEVER mix products across drug classes. \
+  Mvasi/Zirabev = bevacizumab ONLY. Riabni/Ruxience/Truxima = rituximab ONLY.
+- Step therapy is product-tier: preferred must be tried before non-preferred, \
+  and the preferred product must be FROM THE SAME DRUG CLASS.
+- documentationRequirements = prescriber attestations, medical records, or clinical \
+  notes required when requesting non-preferred product exception.
+- referencedDocuments = any external policy documents referenced for full clinical \
+  criteria (e.g., "Table 1" references). Extract the document title and the exact \
+  reference text from the policy.
 - Return a JSON array (one element per drug class). No explanation, no markdown.
 
 Document text:

@@ -489,7 +489,89 @@ def _batch_priority_health_formulary(tables: list[dict]) -> list[dict] | None:
     return chunks
 
 
+# ── BCBS NC Preferred Injectable drug-class splitting ────────────────────────
+
+# Matches drug-class section headers like "Bevacizumab Agents", "Rituximab Agents",
+# "Trastuzumab Agents", or standalone drug class names in ALL CAPS / Title Case
+_BCBS_DRUG_CLASS_RE = re.compile(
+    r"(?:^|\n)([A-Z][a-z]+(?:umab|imab|uzumab|ximab|inib))\s+Agents?\b"
+    r"|(?:^|\n)(BEVACIZUMAB|RITUXIMAB|TRASTUZUMAB|PERTUZUMAB|INFLIXIMAB|ADALIMUMAB)"
+    r"\s+(?:AGENTS?|PRODUCTS?|BIOSIMILARS?)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Known biosimilar → drug class mapping for validation
+_BIOSIMILAR_DRUG_CLASS = {
+    "mvasi": "bevacizumab", "zirabev": "bevacizumab", "avastin": "bevacizumab",
+    "vegzelma": "bevacizumab",
+    "riabni": "rituximab", "ruxience": "rituximab", "truxima": "rituximab",
+    "rituxan": "rituximab", "rituxan hycela": "rituximab",
+    "ogivri": "trastuzumab", "herzuma": "trastuzumab", "ontruzant": "trastuzumab",
+    "trazimera": "trastuzumab", "kanjinti": "trastuzumab", "herceptin": "trastuzumab",
+    "herceptin hylecta": "trastuzumab",
+}
+
+
+def _split_bcbs_preferred_injectable(text: str) -> list[dict] | None:
+    """Split BCBS NC Preferred Injectable policy into per-drug-class chunks.
+
+    Each drug class section (bevacizumab, rituximab, trastuzumab, etc.) is
+    extracted as a separate chunk so that Bedrock processes them independently,
+    preventing cross-contamination of preferred products across drug classes.
+    Returns None if fewer than 2 drug class sections are found.
+    """
+    matches = list(_BCBS_DRUG_CLASS_RE.finditer(text))
+    if len(matches) < 2:
+        logger.info("BCBS preferred injectable: fewer than 2 drug class sections found, not splitting")
+        return None
+
+    # Deduplicate closely spaced matches (within 30 chars)
+    deduped: list[re.Match] = []
+    for m in matches:
+        if not deduped or m.start() > deduped[-1].start() + 30:
+            deduped.append(m)
+
+    if len(deduped) < 2:
+        return None
+
+    # Extract preamble (text before first drug class section)
+    preamble = text[:deduped[0].start()].strip()
+    if len(preamble) > 3000:
+        preamble = preamble[-3000:]  # keep tail end (more relevant)
+
+    chunks: list[dict] = []
+    for i, match in enumerate(deduped):
+        start = match.start()
+        end = deduped[i + 1].start() if i + 1 < len(deduped) else len(text)
+
+        section_text = text[start:end].strip()
+        if len(section_text) < 50:
+            continue
+
+        # Extract drug class name from match groups
+        drug_class = (match.group(1) or match.group(2) or "Unknown").strip()
+        drug_class_lower = drug_class.lower()
+
+        chunks.append({
+            "indicationText": section_text,
+            "preamble": preamble,
+            "chunkType": "per_drug_class",
+            "drugClass": drug_class_lower,
+            "productName": drug_class_lower,  # used by _build_drug_indication_id
+        })
+
+    if not chunks:
+        return None
+
+    logger.info(
+        f"BCBS preferred injectable: {len(chunks)} drug-class chunks — "
+        + ", ".join(c["drugClass"] for c in chunks)
+    )
+    return chunks
+
+
 # ── Table structure preservation ─────────────────────────────────────────────
+
 
 def _serialize_tables_for_bedrock(tables: list[dict]) -> str:
     """Serialize extracted tables with TABLE:/END TABLE markers for Bedrock."""
@@ -797,6 +879,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         raw_text, boilerplate_stripped = _strip_boilerplate(raw_text, payer_name, doc_class)
         logger.info("Florida Blue: extracting Table 1 indication rows")
         indication_chunks = _parse_florida_blue_table_chunks(tables, raw_text)
+
+    elif prompt_id == "F_PREFERRED":
+        raw_text, boilerplate_stripped = _strip_boilerplate(raw_text, payer_name, doc_class)
+        logger.info("BCBS preferred injectable: splitting by drug class section")
+        indication_chunks = _split_bcbs_preferred_injectable(raw_text)
 
     elif prompt_id == "B_FORMULARY":
         # No boilerplate strip for formulary tables

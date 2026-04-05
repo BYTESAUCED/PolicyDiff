@@ -9,6 +9,8 @@
 #   - Cross-document dependency penalty (e.g., UHC "per FDA labeled dosing")
 #   - Nested logic complexity penalty (Cigna 3-level nesting)
 #   - Missing initialAuthDurationMonths penalty
+#   - PSM merge awareness (psmMerged flag)
+#   - Referenced documents detection
 #
 # Step Functions I/O:
 #   Input:  { ..., extractedCriteria: [...], payerName, documentClass, ... }
@@ -45,7 +47,7 @@ PAYER_CONFIDENCE_RULES: dict[str, dict] = {
     "Cigna": {
         # Cigna 3-level nesting → inherently harder to extract
         "base_adjustment": -0.05,
-        "missing_psm_penalty": -0.20,  # preferredProducts empty without PSM companion
+        "missing_psm_penalty": -0.10,  # reduced from -0.20: informational flag, not accuracy error
         "nested_logic_penalty": -0.08,  # additional penalty for deep nesting
     },
 }
@@ -105,7 +107,10 @@ def _score_record(record: dict, payer_name: str, doc_class: str) -> dict:
 
     # Cigna: missing PSM penalty (preferredProducts empty)
     if payer_name == "Cigna":
-        if not record.get("preferredProducts"):
+        if record.get("psmMerged"):
+            # PSM data has been merged — no penalty, add informational note
+            pass
+        elif not record.get("preferredProducts"):
             confidence += payer_rules.get("missing_psm_penalty", 0)
             review_reasons.append("Cigna preferredProducts empty — companion PSM document not merged")
 
@@ -126,6 +131,16 @@ def _score_record(record: dict, payer_name: str, doc_class: str) -> dict:
             confidence += payer_rules.get("global_continuation_penalty", 0)
             review_reasons.append("Continuation criteria may be global (Aetna applies single section to all indications)")
 
+    # ── Referenced documents detection (Bug 4) ───────────────────────────
+
+    referenced_docs = record.get("referencedDocuments", [])
+    if referenced_docs and isinstance(referenced_docs, list):
+        for ref_doc in referenced_docs:
+            doc_title = ref_doc.get("documentTitle", "unknown document") if isinstance(ref_doc, dict) else str(ref_doc)
+            review_reasons.append(f"Criteria references external document: {doc_title} — ingest to complete coverage")
+        # Small penalty: criteria may be incomplete without the referenced doc
+        confidence -= 0.05
+
     # ── Complex conditional logic detection (universal) ──────────────────
 
     excerpt = record.get("rawExcerpt", "")
@@ -134,6 +149,10 @@ def _score_record(record: dict, payer_name: str, doc_class: str) -> dict:
     if complex_count >= 2:
         confidence -= 0.05 * complex_count
         review_reasons.append(f"Multiple conditional logic markers detected ({complex_count})")
+
+    # ── Universal informational flag ─────────────────────────────────────
+
+    review_reasons.append("Refresh criteria")
 
     # ── Clamp and flag ───────────────────────────────────────────────────
 

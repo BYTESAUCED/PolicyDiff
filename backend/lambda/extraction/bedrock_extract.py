@@ -267,7 +267,7 @@ def _build_drug_indication_id(record: dict) -> str:
 _ICD10_PROMPT_IDS = {"A", "A_MULTIPRODUCT", "B", "C", "C_3PHASE", "G", "H", "generic"}
 
 # Prompt IDs that should use indication-level chunks
-_CHUNKED_PROMPT_IDS = {"A", "A_MULTIPRODUCT", "B", "C", "C_3PHASE", "G", "H", "B_FORMULARY"}
+_CHUNKED_PROMPT_IDS = {"A", "A_MULTIPRODUCT", "B", "C", "C_3PHASE", "G", "H", "B_FORMULARY", "F_PREFERRED"}
 
 
 # ── Main handler ──────────────────────────────────────────────────────────────
@@ -426,6 +426,13 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         record["extractionPromptVersion"] = resolved_prompt_id
         record["drugIndicationId"] = _build_drug_indication_id(record)
 
+    # 5.5 PSM companion merge — when processing a PSM doc, push preferredProducts
+    #     back into the companion IP policy's existing DynamoDB records
+    if resolved_prompt_id == "F":
+        companion_ip = event.get("companionIpNumber", "")
+        if companion_ip:
+            _merge_psm_into_companion(all_criteria, companion_ip, payer_name)
+
     # 6. Write to S3
     criteria_key = f"{policy_doc_id}/extracted-criteria.json"
     s3.put_object(
@@ -442,3 +449,97 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         "extractedCriteriaS3Key": criteria_key,
         "extractionPromptUsed": resolved_prompt_id,
     }
+
+
+# ── PSM Companion Merge ──────────────────────────────────────────────────────
+
+def _merge_psm_into_companion(
+    psm_records: list[dict],
+    companion_ip_number: str,
+    payer_name: str,
+) -> None:
+    """Merge PSM preferredProducts into companion IP policy records in DynamoDB.
+
+    When a Cigna PSM document is processed, this function:
+    1. Finds the companion IP policy's policyDocId by querying on policyNumber
+    2. Loads existing criteria records for that policy
+    3. Updates each record's preferredProducts with PSM data
+    4. Marks records with psmMerged: true so confidence scoring knows
+
+    This is a best-effort merge — failures are logged but do not block extraction.
+    """
+    if not psm_records:
+        return
+
+    # Extract preferred products from PSM records
+    psm_preferred = []
+    psm_non_preferred = []
+    for rec in psm_records:
+        if isinstance(rec, dict):
+            psm_preferred.extend(rec.get("preferredProducts", []))
+            psm_non_preferred.extend(rec.get("nonPreferredProducts", []))
+
+    if not psm_preferred and not psm_non_preferred:
+        logger.info("PSM merge: no preferred/non-preferred products to merge")
+        return
+
+    try:
+        dynamodb = boto3.resource("dynamodb")
+        criteria_table_name = os.environ.get("DRUG_POLICY_CRITERIA_TABLE", "DrugPolicyCriteria")
+        policy_docs_table_name = os.environ.get("POLICY_DOCUMENTS_TABLE", "PolicyDocuments")
+
+        # Step 1: Find companion IP policy's policyDocId
+        policy_table = dynamodb.Table(policy_docs_table_name)
+        # Scan for matching policyNumber + payerName (small table, acceptable)
+        scan_result = policy_table.scan(
+            FilterExpression="policyNumber = :pn AND payerName = :pay",
+            ExpressionAttributeValues={":pn": companion_ip_number, ":pay": payer_name},
+            ProjectionExpression="policyDocId",
+        )
+        companion_docs = scan_result.get("Items", [])
+        if not companion_docs:
+            logger.warning(f"PSM merge: companion IP policy {companion_ip_number} not found in DynamoDB")
+            return
+
+        companion_doc_id = companion_docs[0]["policyDocId"]
+        logger.info(f"PSM merge: found companion policyDocId={companion_doc_id}")
+
+        # Step 2: Query criteria records for companion policy
+        criteria_table = dynamodb.Table(criteria_table_name)
+        criteria_result = criteria_table.query(
+            KeyConditionExpression="policyDocId = :pid",
+            ExpressionAttributeValues={":pid": companion_doc_id},
+        )
+        companion_records = criteria_result.get("Items", [])
+        if not companion_records:
+            logger.warning(f"PSM merge: no criteria records found for {companion_doc_id}")
+            return
+
+        # Step 3: Update each companion record with PSM data
+        updated_count = 0
+        for record in companion_records:
+            drug_indication_id = record.get("drugIndicationId", "")
+            try:
+                update_expr = "SET preferredProducts = :pp, psmMerged = :m"
+                expr_values = {":pp": psm_preferred, ":m": True}
+                if psm_non_preferred:
+                    update_expr += ", nonPreferredProducts = :npp"
+                    expr_values[":npp"] = psm_non_preferred
+
+                criteria_table.update_item(
+                    Key={
+                        "policyDocId": companion_doc_id,
+                        "drugIndicationId": drug_indication_id,
+                    },
+                    UpdateExpression=update_expr,
+                    ExpressionAttributeValues=expr_values,
+                )
+                updated_count += 1
+            except Exception as e:
+                logger.warning(f"PSM merge: failed to update {drug_indication_id}: {e}")
+
+        logger.info(f"PSM merge: updated {updated_count}/{len(companion_records)} records for {companion_doc_id}")
+
+    except Exception as e:
+        logger.error(f"PSM merge failed (non-fatal): {e}")
+
