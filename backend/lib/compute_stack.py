@@ -560,9 +560,22 @@ class PolicyDiffComputeStack(cdk.Stack):
             backoff_rate=1.0,
         )
 
+        # ADR: StripPollResult Pass state | pollResult contains Textract block data that bloats the
+        # state payload past the 256KB Step Functions limit, causing downstream Lambdas to receive
+        # the state as a serialized string instead of a dict. Strip it immediately after the choice.
+        strip_poll_result = sfn.Pass(
+            self, "StripPollResult",
+            parameters={
+                "s3Bucket.$": "$.s3Bucket",
+                "s3Key.$": "$.s3Key",
+                "policyDocId.$": "$.policyDocId",
+                "textractResult.$": "$.textractResult",
+            },
+        )
+
         poll_loop = (
             textract_complete
-            .when(textract_succeeded, classify_document)
+            .when(textract_succeeded, strip_poll_result)
             .when(textract_failed, extraction_failed)
             .otherwise(wait_for_textract.next(poll_textract))
         )
@@ -575,12 +588,12 @@ class PolicyDiffComputeStack(cdk.Stack):
             .next(poll_textract)
             .next(textract_complete)
         )
-        # Chain after poll_loop resolves to assemble_text path
         # ADR: classify_document before assemble_text | assemble_text needs payerName + extractionPromptId
         # for payer-specific boilerplate stripping and indication chunking; classify_document reads
         # these from DynamoDB and injects them into the state before assemble_text runs
-        assemble_text.next(bedrock_extraction)
+        strip_poll_result.next(classify_document)
         classify_document.next(assemble_text)
+        assemble_text.next(bedrock_extraction)
         bedrock_extraction.next(confidence_scoring)
         confidence_scoring.next(write_to_dynamo)
         write_to_dynamo.next(embed_and_index)
