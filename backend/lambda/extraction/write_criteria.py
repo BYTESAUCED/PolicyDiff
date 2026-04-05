@@ -60,7 +60,13 @@ def _batch_write_criteria(criteria: list[dict]) -> int:
 
             record["extractedAt"] = now
             item = _convert_floats(record)
-            item = {k: v for k, v in item.items() if v is not None}
+            # Strip None and empty strings — DynamoDB rejects empty strings on GSI key attributes
+            # (drugName-effectiveDate-index requires non-empty values for both keys)
+            GSI_KEY_ATTRS = {"drugName", "effectiveDate"}
+            item = {
+                k: v for k, v in item.items()
+                if v is not None and not (k in GSI_KEY_ATTRS and v == "")
+            }
 
             try:
                 batch.put_item(Item=item)
@@ -96,7 +102,11 @@ def _batch_write_formulary_entries(entries: list[dict]) -> int:
             entry["extractedAt"] = now
 
             item = _convert_floats(entry)
-            item = {k: v for k, v in item.items() if v is not None}
+            GSI_KEY_ATTRS = {"drugName", "effectiveDate"}
+            item = {
+                k: v for k, v in item.items()
+                if v is not None and not (k in GSI_KEY_ATTRS and v == "")
+            }
 
             try:
                 batch.put_item(Item=item)
