@@ -2,15 +2,45 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
     Search, ArrowRight, BookMarked, TableProperties,
     Clock, ChevronRight, Pill, FileText, Calendar
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { apiFetch, ApiError } from "@/lib/api";
 
-// ── Search data ───────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface WatchedDrug {
+    name: string;
+    generic?: string;
+    payers?: string[];
+    updatedPayers?: number;
+    lastUpdate?: string;
+}
+
+interface FeedEntry {
+    diffId: string;
+    drugName: string;
+    payerName: string;
+    severity: string;
+    humanSummary: string;
+    generatedAt: string;
+    field?: string;
+    indication?: string;
+}
+
+interface RecentQuery {
+    queryId: string;
+    queryText: string;
+    queryType: string;
+    createdAt: string;
+}
+
+// ── Search data (static drug list for autocomplete) ───────────────────────────
 
 const allDrugs = [
     { name: "Infliximab",    brands: "Remicade, Inflectra, Avsola",    payers: 6 },
@@ -39,98 +69,21 @@ function fuzzyMatch(query: string, target: string): number {
     return qi === q.length ? score : 0;
 }
 
-// ── Mock data ─────────────────────────────────────────────────────────────────
+function severityToType(severity: string): "Clinical" | "Cosmetic" {
+    return severity === "breaking" || severity === "restrictive" ? "Clinical" : "Cosmetic";
+}
 
-const watchedDrugs = [
-    {
-        name: "Infliximab",
-        generic: "infliximab",
-        payers: ["UHC", "Cigna", "Aetna", "BCBS NC", "Humana", "CVS"],
-        updatedPayers: 2,
-        lastUpdate: "2 days ago",
-    },
-    {
-        name: "Adalimumab",
-        generic: "adalimumab",
-        payers: ["UHC", "Aetna", "BCBS CA", "Molina"],
-        updatedPayers: 1,
-        lastUpdate: "4 days ago",
-    },
-    {
-        name: "Ustekinumab",
-        generic: "ustekinumab",
-        payers: ["Cigna", "BCBS NC", "UPMC", "Centene"],
-        updatedPayers: 0,
-        lastUpdate: "3 weeks ago",
-    },
-];
-
-const recentChanges = [
-    {
-        type: "Clinical",
-        payer: "UnitedHealthcare",
-        drug: "Infliximab",
-        description: "Avsola and Inflectra now mandatory first-line. Remicade requires documented biosimilar failure.",
-        date: "2 days ago",
-        effectiveDate: "2026-04-01",
-    },
-    {
-        type: "Clinical",
-        payer: "Aetna",
-        drug: "Adalimumab",
-        description: "Step therapy trial duration increased from 12 to 14 weeks for rheumatoid arthritis indication.",
-        date: "4 days ago",
-        effectiveDate: "2026-03-15",
-    },
-    {
-        type: "Cosmetic",
-        payer: "Cigna",
-        drug: "Ustekinumab",
-        description: "Updated clinical reference citations. No criteria changes.",
-        date: "1 week ago",
-        effectiveDate: "2026-03-10",
-    },
-    {
-        type: "Clinical",
-        payer: "BCBS NC",
-        drug: "Infliximab",
-        description: "Prior authorization now required for all biosimilar products, previously only brand.",
-        date: "1 week ago",
-        effectiveDate: "2026-03-08",
-    },
-    {
-        type: "Cosmetic",
-        payer: "Humana",
-        drug: "Secukinumab",
-        description: "Effective date updated. Formatting changes to step therapy table.",
-        date: "2 weeks ago",
-        effectiveDate: "2026-02-28",
-    },
-];
-
-const recentComparisons = [
-    {
-        drug: "Infliximab",
-        payers: ["UHC", "Cigna", "Aetna", "BCBS NC"],
-        runBy: "Om",
-        date: "3 hrs ago",
-        href: "/compare",
-    },
-    {
-        drug: "Adalimumab",
-        payers: ["UHC", "Aetna", "BCBS CA"],
-        runBy: "Atharva",
-        date: "Yesterday",
-        href: "/compare",
-    },
-    {
-        drug: "Ustekinumab",
-        payers: ["Cigna", "UPMC", "Centene"],
-        runBy: "Dominic",
-        date: "2 days ago",
-        href: "/compare",
-    },
-];
+function relativeTime(iso: string): string {
+    if (!iso) return "";
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs} hr${hrs > 1 ? "s" : ""} ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7) return `${days} day${days > 1 ? "s" : ""} ago`;
+    return `${Math.floor(days / 7)} week${Math.floor(days / 7) > 1 ? "s" : ""} ago`;
+}
 
 const watchedDrugBlockClasses = [
     "bg-card hover:bg-muted/20",
@@ -144,6 +97,13 @@ export default function DashboardPage() {
     const [open, setOpen] = useState(false);
     const searchRef = useRef<HTMLDivElement>(null);
 
+    const [watchedDrugs, setWatchedDrugs] = useState<WatchedDrug[]>([]);
+    const [recentChanges, setRecentChanges] = useState<FeedEntry[]>([]);
+    const [recentQueries, setRecentQueries] = useState<RecentQuery[]>([]);
+    const [totalPolicies, setTotalPolicies] = useState<number | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
     const results = query.trim()
         ? allDrugs
             .map((d) => ({ drug: d, score: Math.max(fuzzyMatch(query, d.name), fuzzyMatch(query, d.brands)) }))
@@ -151,6 +111,44 @@ export default function DashboardPage() {
             .sort((a, b) => b.score - a.score)
             .map(({ drug }) => drug)
         : [];
+
+    const fetchDashboardData = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const [prefsData, feedData, queriesData, policiesData] = await Promise.allSettled([
+                apiFetch<{ watchedDrugs?: WatchedDrug[] }>("/api/users/me/preferences"),
+                apiFetch<{ feed: FeedEntry[] }>("/api/diffs/feed", undefined, { limit: "5" }),
+                apiFetch<{ queries: RecentQuery[] }>("/api/queries"),
+                apiFetch<{ items: unknown[] }>("/api/policies"),
+            ]);
+
+            if (prefsData.status === "fulfilled") {
+                const drugs = prefsData.value.watchedDrugs ?? [];
+                setWatchedDrugs(drugs);
+            }
+
+            if (feedData.status === "fulfilled") {
+                setRecentChanges(feedData.value.feed ?? []);
+            }
+
+            if (queriesData.status === "fulfilled") {
+                setRecentQueries(queriesData.value.queries ?? []);
+            }
+
+            if (policiesData.status === "fulfilled") {
+                setTotalPolicies(policiesData.value.items?.length ?? 0);
+            }
+        } catch (e) {
+            setError(e instanceof ApiError ? e.message : "Failed to load dashboard data");
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchDashboardData();
+    }, [fetchDashboardData]);
 
     useEffect(() => {
         function handleClick(e: MouseEvent) {
@@ -162,6 +160,14 @@ export default function DashboardPage() {
         return () => document.removeEventListener("mousedown", handleClick);
     }, []);
 
+    // Derive stats from real data
+    const drugsTracked = watchedDrugs.length || totalPolicies || 0;
+    const changesThisWeek = recentChanges.filter(c => {
+        if (!c.generatedAt) return false;
+        return Date.now() - new Date(c.generatedAt).getTime() < 7 * 24 * 60 * 60 * 1000;
+    }).length;
+    const actionableAlerts = recentChanges.filter(c => c.severity === "breaking").length;
+
     return (
         <div className="p-8 space-y-10 max-w-6xl">
 
@@ -170,7 +176,7 @@ export default function DashboardPage() {
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 pb-6">
                     <div className="space-y-3">
                         <h1 className="text-4xl md:text-5xl font-medium tracking-tight text-foreground leading-[1.1] font-serif">
-                            Welcome back, Om.
+                            Welcome back.
                         </h1>
                         <p className="text-lg text-muted-foreground">
                             Here's what changed in <span className="italic text-[#cd6c55] font-serif">medical drug policies</span> today.
@@ -188,19 +194,28 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-2">
                         <div className="w-1.5 h-1.5 rounded-full bg-primary" />
                         <span className="text-muted-foreground">Tracking</span>
-                        <span className="font-semibold text-foreground">12 drugs</span>
+                        {loading
+                            ? <Skeleton className="h-4 w-8" />
+                            : <span className="font-semibold text-foreground">{drugsTracked} drugs</span>
+                        }
                     </div>
                     <div className="w-[1px] h-3.5 bg-border dark:bg-white/10" />
                     <div className="flex items-center gap-2">
                         <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
                         <span className="text-muted-foreground">Changes this wk</span>
-                        <span className="font-semibold text-foreground">5</span>
+                        {loading
+                            ? <Skeleton className="h-4 w-6" />
+                            : <span className="font-semibold text-foreground">{changesThisWeek}</span>
+                        }
                     </div>
                     <div className="w-[1px] h-3.5 bg-border dark:bg-white/10" />
                     <div className="flex items-center gap-2">
                         <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
                         <span className="text-muted-foreground">Actionable alerts</span>
-                        <span className="font-semibold text-foreground">2</span>
+                        {loading
+                            ? <Skeleton className="h-4 w-6" />
+                            : <span className="font-semibold text-foreground">{actionableAlerts}</span>
+                        }
                     </div>
                 </div>
 
@@ -249,6 +264,13 @@ export default function DashboardPage() {
                 </div>
             </div>
 
+            {/* ── Error state ── */}
+            {error && (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                    {error}
+                </div>
+            )}
+
             {/* ── Watched Drugs ── */}
             <section className="space-y-5">
                 <div className="flex items-center justify-between">
@@ -256,7 +278,7 @@ export default function DashboardPage() {
                         <div className="w-1 h-3.5 rounded-full bg-primary" />
                         <BookMarked className="h-4 w-4 text-primary" />
                         <h2 className="text-xs font-bold uppercase tracking-widest text-foreground">Watched Drugs</h2>
-                        <span className="text-xs text-muted-foreground">({watchedDrugs.length})</span>
+                        {!loading && <span className="text-xs text-muted-foreground">({watchedDrugs.length})</span>}
                     </div>
                     <Link href="/diffs">
                         <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground gap-1 cursor-pointer">
@@ -265,40 +287,64 @@ export default function DashboardPage() {
                     </Link>
                 </div>
 
-                <div className="grid grid-cols-3 border border-border dark:border-white/10 rounded-lg divide-x divide-border dark:divide-white/10 bg-transparent">
-                    {watchedDrugs.map((drug, index) => (
-                        <Link
-                            key={drug.name}
-                            href="/explorer"
-                            className={cn(
-                                "block group cursor-pointer px-5 py-5 transition-colors",
-                                watchedDrugBlockClasses[index % watchedDrugBlockClasses.length],
-                            )}
-                        >
-                            <div className="space-y-4">
-                                <div className="flex items-start justify-between gap-2">
-                                    <div className="flex items-center gap-1.5">
-                                        <Pill className="h-4 w-4 text-primary shrink-0" />
-                                        <span className="text-sm font-semibold tracking-tight group-hover:text-primary transition-colors">{drug.name}</span>
+                {loading ? (
+                    <div className="grid grid-cols-3 border border-border dark:border-white/10 rounded-lg divide-x divide-border dark:divide-white/10">
+                        {[0, 1, 2].map(i => (
+                            <div key={i} className="px-5 py-5 space-y-4">
+                                <Skeleton className="h-4 w-24" />
+                                <div className="flex gap-1.5 flex-wrap">
+                                    <Skeleton className="h-5 w-10" />
+                                    <Skeleton className="h-5 w-12" />
+                                    <Skeleton className="h-5 w-10" />
+                                </div>
+                                <Skeleton className="h-3 w-28" />
+                            </div>
+                        ))}
+                    </div>
+                ) : watchedDrugs.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border px-6 py-8 text-center text-sm text-muted-foreground">
+                        No watched drugs yet. Your preferences will appear here once configured.
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-3 border border-border dark:border-white/10 rounded-lg divide-x divide-border dark:divide-white/10 bg-transparent">
+                        {watchedDrugs.slice(0, 3).map((drug, index) => (
+                            <Link
+                                key={drug.name}
+                                href="/explorer"
+                                className={cn(
+                                    "block group cursor-pointer px-5 py-5 transition-colors",
+                                    watchedDrugBlockClasses[index % watchedDrugBlockClasses.length],
+                                )}
+                            >
+                                <div className="space-y-4">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex items-center gap-1.5">
+                                            <Pill className="h-4 w-4 text-primary shrink-0" />
+                                            <span className="text-sm font-semibold tracking-tight group-hover:text-primary transition-colors">{drug.name}</span>
+                                        </div>
+                                        {(drug.updatedPayers ?? 0) > 0 && (
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800 shrink-0 whitespace-nowrap">
+                                                {drug.updatedPayers} updated
+                                            </span>
+                                        )}
                                     </div>
-                                    {drug.updatedPayers > 0 && (
-                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800 shrink-0 whitespace-nowrap">
-                                            {drug.updatedPayers} updated
-                                        </span>
+                                    {drug.payers && drug.payers.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {drug.payers.map((payer) => (
+                                                <span key={payer} className="text-[11px] font-mono px-2 py-0.5 rounded border border-border dark:border-white/10 text-muted-foreground bg-transparent">
+                                                    {payer}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {drug.lastUpdate && (
+                                        <p className="text-xs text-muted-foreground/70">Last change {drug.lastUpdate}</p>
                                     )}
                                 </div>
-                                <div className="flex flex-wrap gap-1.5">
-                                    {drug.payers.map((payer) => (
-                                        <span key={payer} className="text-[11px] font-mono px-2 py-0.5 rounded border border-border dark:border-white/10 text-muted-foreground bg-transparent">
-                                            {payer}
-                                        </span>
-                                    ))}
-                                </div>
-                                <p className="text-xs text-muted-foreground/70">Last change {drug.lastUpdate}</p>
-                            </div>
-                        </Link>
-                    ))}
-                </div>
+                            </Link>
+                        ))}
+                    </div>
+                )}
             </section>
 
             {/* ── Bottom grid ── */}
@@ -310,87 +356,110 @@ export default function DashboardPage() {
                         <div className="w-1 h-3.5 rounded-full bg-primary" />
                         <h2 className="text-xs font-bold uppercase tracking-widest text-foreground">Recent Policy Changes</h2>
                     </div>
-                    <div className="divide-y divide-border dark:divide-white/10 border-y border-border dark:border-white/10">
-                        {recentChanges.map((change, i) => (
-                            <Link key={i} href="/diffs" className="block group cursor-pointer hover:bg-muted/20 transition-colors">
-                                <div className="flex items-start gap-4 py-4 px-2">
-                                    <div className="mt-1.5 shrink-0">
-                                        {change.type === "Clinical" ? (
-                                            <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
-                                        ) : (
-                                            <div className="w-2 h-2 rounded-full bg-muted-foreground/40" />
-                                        )}
+                    {loading ? (
+                        <div className="divide-y divide-border dark:divide-white/10 border-y border-border dark:border-white/10">
+                            {[0, 1, 2].map(i => (
+                                <div key={i} className="flex items-start gap-4 py-4 px-2">
+                                    <Skeleton className="h-2 w-2 rounded-full mt-2 shrink-0" />
+                                    <div className="flex-1 space-y-2">
+                                        <Skeleton className="h-4 w-48" />
+                                        <Skeleton className="h-3 w-full" />
+                                        <Skeleton className="h-3 w-3/4" />
                                     </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{change.payer}</span>
-                                            <span className="text-muted-foreground/30 text-xs">·</span>
-                                            <span className="text-xs font-mono text-muted-foreground">{change.drug}</span>
-                                            <span className="text-muted-foreground/30 text-xs">·</span>
-                                            {change.type === "Clinical" ? (
-                                                <span className="text-[10px] font-bold uppercase tracking-widest text-red-600 dark:text-red-400">
-                                                    Clinical
-                                                </span>
-                                            ) : (
-                                                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                                                    Cosmetic
-                                                </span>
-                                            )}
-                                        </div>
-                                        <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">{change.description}</p>
-                                    </div>
-                                    <div className="text-right shrink-0">
-                                        <p className="text-xs text-muted-foreground">{change.date}</p>
-                                        <p className="text-[10px] font-mono text-muted-foreground/60 mt-0.5">eff. {change.effectiveDate}</p>
-                                    </div>
+                                    <Skeleton className="h-3 w-16 shrink-0" />
                                 </div>
-                            </Link>
-                        ))}
-                    </div>
+                            ))}
+                        </div>
+                    ) : recentChanges.length === 0 ? (
+                        <div className="border-y border-border dark:border-white/10 py-8 text-center text-sm text-muted-foreground">
+                            No policy changes yet. Upload policies to see diffs here.
+                        </div>
+                    ) : (
+                        <div className="divide-y divide-border dark:divide-white/10 border-y border-border dark:border-white/10">
+                            {recentChanges.slice(0, 5).map((change) => {
+                                const type = severityToType(change.severity);
+                                return (
+                                    <Link key={change.diffId} href="/diffs" className="block group cursor-pointer hover:bg-muted/20 transition-colors">
+                                        <div className="flex items-start gap-4 py-4 px-2">
+                                            <div className="mt-1.5 shrink-0">
+                                                {type === "Clinical" ? (
+                                                    <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
+                                                ) : (
+                                                    <div className="w-2 h-2 rounded-full bg-muted-foreground/40" />
+                                                )}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{change.payerName}</span>
+                                                    <span className="text-muted-foreground/30 text-xs">·</span>
+                                                    <span className="text-xs font-mono text-muted-foreground">{change.drugName}</span>
+                                                    <span className="text-muted-foreground/30 text-xs">·</span>
+                                                    {type === "Clinical" ? (
+                                                        <span className="text-[10px] font-bold uppercase tracking-widest text-red-600 dark:text-red-400">Clinical</span>
+                                                    ) : (
+                                                        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Cosmetic</span>
+                                                    )}
+                                                </div>
+                                                <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">{change.humanSummary}</p>
+                                            </div>
+                                            <div className="text-right shrink-0">
+                                                <p className="text-xs text-muted-foreground">{relativeTime(change.generatedAt)}</p>
+                                            </div>
+                                        </div>
+                                    </Link>
+                                );
+                            })}
+                        </div>
+                    )}
                     <Link href="/diffs" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
                         View all changes <ArrowRight className="h-3 w-3" />
                     </Link>
                 </section>
 
-                {/* Recent Comparisons */}
+                {/* Recent Queries */}
                 <section className="col-span-3 space-y-5">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <div className="w-1 h-3.5 rounded-full bg-primary" />
-                            <h2 className="text-xs font-bold uppercase tracking-widest text-foreground">Recent Comparisons</h2>
+                            <h2 className="text-xs font-bold uppercase tracking-widest text-foreground">Recent Queries</h2>
                         </div>
-                        <Link href="/compare">
+                        <Link href="/query">
                             <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground gap-1 cursor-pointer">
                                 <TableProperties className="h-3 w-3" /> New
                             </Button>
                         </Link>
                     </div>
-                    <div className="rounded-lg border border-border dark:border-white/10 divide-y divide-border dark:divide-white/10 bg-transparent">
-                        {recentComparisons.map((comp, i) => (
-                            <Link key={i} href={comp.href} className="block group cursor-pointer bg-card hover:bg-muted/20 transition-colors first:rounded-t-lg last:rounded-b-lg">
-                                <div className="px-4 py-4">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <div className="flex items-center gap-1.5">
-                                            <Pill className="h-3.5 w-3.5 text-primary shrink-0" />
-                                            <span className="text-sm font-medium group-hover:text-primary transition-colors">{comp.drug}</span>
-                                        </div>
-                                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0 translate-x-[-4px] group-hover:translate-x-0" />
-                                    </div>
-                                    <div className="flex flex-wrap gap-1 mt-2.5">
-                                        {comp.payers.map((payer) => (
-                                            <span key={payer} className="text-[11px] font-mono px-1.5 py-0.5 rounded border border-border dark:border-white/10 text-muted-foreground bg-transparent">
-                                                {payer}
-                                            </span>
-                                        ))}
-                                    </div>
-                                    <div className="flex items-center gap-1.5 mt-2.5">
-                                        <Clock className="h-3 w-3 text-muted-foreground/50" />
-                                        <p className="text-[11px] text-muted-foreground/70">{comp.date} · {comp.runBy}</p>
-                                    </div>
+                    {loading ? (
+                        <div className="rounded-lg border border-border dark:border-white/10 divide-y divide-border dark:divide-white/10">
+                            {[0, 1, 2].map(i => (
+                                <div key={i} className="px-4 py-4 space-y-2">
+                                    <Skeleton className="h-4 w-32" />
+                                    <Skeleton className="h-3 w-24" />
                                 </div>
-                            </Link>
-                        ))}
-                    </div>
+                            ))}
+                        </div>
+                    ) : recentQueries.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+                            No queries yet. Ask a question to get started.
+                        </div>
+                    ) : (
+                        <div className="rounded-lg border border-border dark:border-white/10 divide-y divide-border dark:divide-white/10 bg-transparent">
+                            {recentQueries.slice(0, 3).map((q) => (
+                                <Link key={q.queryId} href="/query" className="block group cursor-pointer bg-card hover:bg-muted/20 transition-colors first:rounded-t-lg last:rounded-b-lg">
+                                    <div className="px-4 py-4">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p className="text-sm font-medium group-hover:text-primary transition-colors line-clamp-1">{q.queryText}</p>
+                                            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                                        </div>
+                                        <div className="flex items-center gap-1.5 mt-2">
+                                            <Clock className="h-3 w-3 text-muted-foreground/50" />
+                                            <p className="text-[11px] text-muted-foreground/70">{relativeTime(q.createdAt)}</p>
+                                        </div>
+                                    </div>
+                                </Link>
+                            ))}
+                        </div>
+                    )}
                 </section>
             </div>
         </div>

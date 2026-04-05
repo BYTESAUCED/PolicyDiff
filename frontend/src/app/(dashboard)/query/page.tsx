@@ -1,10 +1,44 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { BookOpen, Quote, ChevronDown, ArrowUp } from "lucide-react";
+import { BookOpen, Quote, ChevronDown, ArrowUp, AlertCircle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { apiFetch, ApiError } from "@/lib/api";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface Citation {
+    payer: string;
+    documentTitle: string;
+    effectiveDate: string;
+    excerpt: string;
+}
+
+interface QueryResponse {
+    queryId: string;
+    queryType: string;
+    answer: string;
+    citations: Citation[];
+    dataCompleteness: string;
+    responseTimeMs: number;
+}
+
+interface RecentQuery {
+    queryId: string;
+    queryText: string;
+    queryType: string;
+    createdAt: string;
+}
+
+interface Message {
+    role: "user" | "assistant";
+    content: string;
+    citations?: Citation[];
+    dataCompleteness?: string;
+    error?: boolean;
+}
 
 const suggestedQueries = [
     "Which plans cover infliximab?",
@@ -14,42 +48,12 @@ const suggestedQueries = [
     "Rituximab biosimilar coverage",
 ];
 
-const mockResponse = `### Step Therapy Requirements for Adalimumab: Aetna vs UHC
-
-Both Aetna and UnitedHealthcare cover adalimumab (Humira and its biosimilars) for Rheumatoid Arthritis, but their step therapy requirements differ significantly.
-
-| Payer | Preferred Products | Prior Therapy Required | Trial Duration |
-|-------|-------------------|------------------------|----------------|
-| **Aetna** | Cyltezo, Amjevita | **1 DMARD failure** (e.g., methotrexate) | 12 weeks |
-| **UnitedHealthcare** | Amjevita | **2 failures** (DMARD + targeted conventional) | 14 weeks |
-
-**Summary**: Aetna is **less restrictive** than UHC. Aetna requires one 12-week DMARD trial; UHC requires two prior therapies over 14 weeks.
-
-*Based on ingested Commercial policies as of Q1 2026.*`;
-
-interface Message {
-    role: "user" | "assistant";
-    content: string;
-}
-
-const citations = [
-    {
-        payer: "AETNA",
-        doc: "CPB 0321 · Feb 12, 2026",
-        quote: "Patient must have a documented inadequate response to at least one conventional DMARD for a minimum of 12 weeks prior to authorization.",
-    },
-    {
-        payer: "UNITEDHEALTHCARE",
-        doc: "Medical Benefit: Adalimumab · Jan 1, 2026",
-        quote: "Authorization requires documentation demonstrating trial and failure of two prior therapies for no less than 14 weeks.",
-    },
-];
-
 export default function QueryInterfacePage() {
     const [query, setQuery] = useState("");
     const [messages, setMessages] = useState<Message[]>([]);
     const [isResponding, setIsResponding] = useState(false);
-    const [citationsOpen, setCitationsOpen] = useState(false);
+    const [citationsOpen, setCitationsOpen] = useState<Record<number, boolean>>({});
+    const [recentQueries, setRecentQueries] = useState<RecentQuery[]>([]);
     const bottomRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const isEmpty = messages.length === 0 && !isResponding;
@@ -58,16 +62,50 @@ export default function QueryInterfacePage() {
         if (!isEmpty) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages, isResponding, isEmpty]);
 
-    const handleQuery = (q?: string) => {
-        const text = q ?? query;
-        if (!text.trim() || isResponding) return;
-        setMessages((prev) => [...prev, { role: "user", content: text }]);
+    // Load recent queries for suggested chips
+    const loadRecentQueries = useCallback(async () => {
+        try {
+            const data = await apiFetch<{ queries: RecentQuery[] }>("/api/queries");
+            setRecentQueries(data.queries ?? []);
+        } catch {
+            // Non-critical — silently ignore
+        }
+    }, []);
+
+    useEffect(() => {
+        loadRecentQueries();
+    }, [loadRecentQueries]);
+
+    const handleQuery = async (q?: string) => {
+        const text = (q ?? query).trim();
+        if (!text || isResponding) return;
+
+        setMessages(prev => [...prev, { role: "user", content: text }]);
         setQuery("");
         setIsResponding(true);
-        setTimeout(() => {
-            setMessages((prev) => [...prev, { role: "assistant", content: mockResponse }]);
+
+        try {
+            // ADR: POST /api/query returns answer synchronously | backend calls Bedrock inline
+            const result = await apiFetch<QueryResponse>("/api/query", {
+                method: "POST",
+                body: JSON.stringify({ queryText: text }),
+            });
+
+            setMessages(prev => [...prev, {
+                role: "assistant",
+                content: result.answer,
+                citations: result.citations ?? [],
+                dataCompleteness: result.dataCompleteness,
+            }]);
+
+            // Refresh recent queries list after successful query
+            loadRecentQueries();
+        } catch (e) {
+            const msg = e instanceof ApiError ? e.message : "Query failed. Please try again.";
+            setMessages(prev => [...prev, { role: "assistant", content: msg, error: true }]);
+        } finally {
             setIsResponding(false);
-        }, 1400);
+        }
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -77,12 +115,18 @@ export default function QueryInterfacePage() {
         }
     };
 
+    const toggleCitations = (idx: number) => {
+        setCitationsOpen(prev => ({ ...prev, [idx]: !prev[idx] }));
+    };
+
+    // Show recent query texts as chips if no suggested queries match
+    const chips = suggestedQueries;
+
     return (
         <div className="flex flex-col h-full relative">
-            {/* ── EMPTY STATE ── centered hero */}
+            {/* ── EMPTY STATE ── */}
             {isEmpty && (
                 <div className="flex-1 flex flex-col items-center justify-center px-6 pb-4 select-none">
-                    {/* Gemini-style multicolor diamond */}
                     <div className="mb-6">
                         <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
                             <path d="M18 2C18 2 14 14 2 18C14 18 18 34 18 34C18 34 22 18 34 18C22 18 18 2 18 2Z" fill="url(#g1)" />
@@ -104,7 +148,6 @@ export default function QueryInterfacePage() {
                         Ask anything about payer policies, step therapy, or coverage criteria.
                     </p>
 
-                    {/* Large centered input — Gemini style */}
                     <div className="w-full max-w-2xl">
                         <div className="relative rounded-3xl border border-border bg-card px-5 pt-4 pb-3 shadow-xl transition-colors focus-within:border-ring dark:border-white/10 dark:bg-[#1a1a1a] dark:focus-within:border-white/20">
                             <Textarea
@@ -128,9 +171,8 @@ export default function QueryInterfacePage() {
                             </div>
                         </div>
 
-                        {/* Pill suggestion chips */}
                         <div className="flex flex-wrap justify-center gap-2 mt-5">
-                            {suggestedQueries.map((sq, i) => (
+                            {chips.map((sq, i) => (
                                 <button
                                     key={i}
                                     onClick={() => handleQuery(sq)}
@@ -140,6 +182,12 @@ export default function QueryInterfacePage() {
                                 </button>
                             ))}
                         </div>
+
+                        {recentQueries.length > 0 && (
+                            <p className="text-center text-xs text-muted-foreground/50 mt-4">
+                                {recentQueries.length} previous {recentQueries.length === 1 ? "query" : "queries"} in history
+                            </p>
+                        )}
                     </div>
                 </div>
             )}
@@ -158,7 +206,6 @@ export default function QueryInterfacePage() {
                                     </div>
                                 ) : (
                                     <div className="flex gap-3">
-                                        {/* Gemini diamond avatar */}
                                         <div className="shrink-0 mt-1">
                                             <svg width="20" height="20" viewBox="0 0 36 36" fill="none">
                                                 <path d="M18 2C18 2 14 14 2 18C14 18 18 34 18 34C18 34 22 18 34 18C22 18 18 2 18 2Z" fill="url(#g2)" />
@@ -172,39 +219,59 @@ export default function QueryInterfacePage() {
                                             </svg>
                                         </div>
                                         <div className="flex-1 min-w-0 space-y-5">
-                                            <div className="prose prose-sm max-w-none text-foreground/90 prose-headings:text-foreground prose-p:leading-relaxed prose-p:text-foreground/80 prose-strong:text-foreground dark:prose-invert">
-                                                <ReactMarkdown>{msg.content}</ReactMarkdown>
-                                            </div>
+                                            {msg.error ? (
+                                                <div className="flex items-center gap-2 text-sm text-destructive">
+                                                    <AlertCircle className="h-4 w-4 shrink-0" />
+                                                    {msg.content}
+                                                </div>
+                                            ) : (
+                                                <div className="prose prose-sm max-w-none text-foreground/90 prose-headings:text-foreground prose-p:leading-relaxed prose-p:text-foreground/80 prose-strong:text-foreground dark:prose-invert">
+                                                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                                                </div>
+                                            )}
+
+                                            {msg.dataCompleteness && msg.dataCompleteness !== "complete" && !msg.error && (
+                                                <p className="text-xs text-amber-500/80 font-mono">
+                                                    Data completeness: {msg.dataCompleteness}
+                                                </p>
+                                            )}
 
                                             {/* Citations accordion */}
-                                            <div className="overflow-hidden rounded-2xl border border-border text-sm dark:border-white/8">
-                                                <button
-                                                    className="flex w-full items-center justify-between px-4 py-3 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground dark:hover:bg-white/[0.03]"
-                                                    onClick={() => setCitationsOpen(!citationsOpen)}
-                                                >
-                                                    <div className="flex items-center gap-2">
-                                                        <BookOpen className="h-3.5 w-3.5" />
-                                                        <span className="text-xs">2 sources cited</span>
-                                                    </div>
-                                                    <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${citationsOpen ? "rotate-180" : ""}`} />
-                                                </button>
-                                                {citationsOpen && (
-                                                    <div className="divide-y divide-border border-t border-border dark:divide-white/8 dark:border-white/8">
-                                                        {citations.map((c, ci) => (
-                                                            <div key={ci} className="px-4 py-3 space-y-2">
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60 dark:border-white/10">{c.payer}</span>
-                                                                    <span className="text-xs text-foreground/70 font-medium">{c.doc}</span>
+                                            {msg.citations && msg.citations.length > 0 && (
+                                                <div className="overflow-hidden rounded-2xl border border-border text-sm dark:border-white/8">
+                                                    <button
+                                                        className="flex w-full items-center justify-between px-4 py-3 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground dark:hover:bg-white/[0.03]"
+                                                        onClick={() => toggleCitations(i)}
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            <BookOpen className="h-3.5 w-3.5" />
+                                                            <span className="text-xs">{msg.citations.length} source{msg.citations.length !== 1 ? "s" : ""} cited</span>
+                                                        </div>
+                                                        <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${citationsOpen[i] ? "rotate-180" : ""}`} />
+                                                    </button>
+                                                    {citationsOpen[i] && (
+                                                        <div className="divide-y divide-border border-t border-border dark:divide-white/8 dark:border-white/8">
+                                                            {msg.citations.map((c, ci) => (
+                                                                <div key={ci} className="px-4 py-3 space-y-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60 dark:border-white/10">{c.payer}</span>
+                                                                        <span className="text-xs text-foreground/70 font-medium">{c.documentTitle}</span>
+                                                                        {c.effectiveDate && (
+                                                                            <span className="text-xs text-muted-foreground/50">· {c.effectiveDate}</span>
+                                                                        )}
+                                                                    </div>
+                                                                    {c.excerpt && (
+                                                                        <div className="flex gap-2 border-l border-border pl-3 text-xs text-muted-foreground dark:border-white/10">
+                                                                            <Quote className="h-3 w-3 shrink-0 mt-0.5 opacity-50" />
+                                                                            <p className="italic leading-relaxed">{c.excerpt}</p>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
-                                                                <div className="flex gap-2 border-l border-border pl-3 text-xs text-muted-foreground dark:border-white/10">
-                                                                    <Quote className="h-3 w-3 shrink-0 mt-0.5 opacity-50" />
-                                                                    <p className="italic leading-relaxed">{c.quote}</p>
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 )}
@@ -238,7 +305,7 @@ export default function QueryInterfacePage() {
                 </div>
             )}
 
-            {/* ── BOTTOM INPUT BAR (appears after first message) ── */}
+            {/* ── BOTTOM INPUT BAR ── */}
             {!isEmpty && (
                 <div className="shrink-0 px-6 py-4">
                     <div className="max-w-2xl mx-auto">

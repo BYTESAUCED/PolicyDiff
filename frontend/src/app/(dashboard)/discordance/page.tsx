@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Filter, Search, ArrowRight } from "lucide-react";
+import { Filter, Search, ArrowRight, AlertCircle, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
     Table,
     TableBody,
@@ -12,60 +13,61 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
+import { apiFetch, ApiError } from "@/lib/api";
 
-const discordances = [
-    {
-        id: "dsc1",
-        payer: "Aetna",
-        drug: "Ustekinumab",
-        criterion: "Step Therapy",
-        medical: { val: "4 DMARD failures", sev: "destructive" },
-        pharmacy: { val: "2 DMARD failures", sev: "warning" },
-        mostRestrictive: "medical",
-    },
-    {
-        id: "dsc2",
-        payer: "Cigna",
-        drug: "Infliximab",
-        criterion: "Prescriber",
-        medical: { val: "Rheumatologist only", sev: "destructive" },
-        pharmacy: { val: "Any specialist", sev: "success" },
-        mostRestrictive: "medical",
-    },
-    {
-        id: "dsc3",
-        payer: "UnitedHealthcare",
-        drug: "Rituximab",
-        criterion: "Trial Duration",
-        medical: { val: "12 weeks", sev: "success" },
-        pharmacy: { val: "16 weeks", sev: "destructive" },
-        mostRestrictive: "pharmacy",
-    },
-    {
-        id: "dsc4",
-        payer: "Anthem",
-        drug: "Adalimumab",
-        criterion: "Step Therapy",
-        medical: { val: "1 DMARD failure", sev: "success" },
-        pharmacy: { val: "2 DMARD failures", sev: "destructive" },
-        mostRestrictive: "pharmacy",
-    },
-];
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-const sevColor = (sev: string) =>
-    sev === "destructive"
-        ? "text-red-400"
-        : sev === "warning"
-            ? "text-amber-400"
-            : "text-emerald-400";
+interface DiscordanceSummary {
+    diffId?: string;
+    drugName: string;
+    payerName: string;
+    discordanceScore?: number | null;
+    summary: string;
+    changesCount?: number;
+    generatedAt?: string;
+    status?: string;
+}
+
+interface DiscordanceResponse {
+    items: DiscordanceSummary[];
+    count: number;
+}
+
+// Map discordance score to severity label
+function scoreSeverity(score: number | null | undefined): { label: string; cls: string } {
+    if (score == null) return { label: "Pending", cls: "text-muted-foreground" };
+    if (score >= 0.7) return { label: "High", cls: "text-red-400" };
+    if (score >= 0.4) return { label: "Medium", cls: "text-amber-400" };
+    return { label: "Low", cls: "text-emerald-400" };
+}
 
 export default function DiscordancePage() {
     const [searchQuery, setSearchQuery] = useState("");
+    const [discordances, setDiscordances] = useState<DiscordanceSummary[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const fetchDiscordances = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const data = await apiFetch<DiscordanceResponse>("/api/discordance");
+            setDiscordances(data.items ?? []);
+        } catch (e) {
+            setError(e instanceof ApiError ? e.message : "Failed to load discordance alerts");
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchDiscordances();
+    }, [fetchDiscordances]);
 
     const filtered = discordances.filter(
         (d) =>
-            d.payer.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            d.drug.toLowerCase().includes(searchQuery.toLowerCase())
+            d.payerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            d.drugName.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
     return (
@@ -74,9 +76,11 @@ export default function DiscordancePage() {
             <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                     <h2 className="text-2xl font-bold tracking-tight">Discordance Alerts</h2>
-                    <span className="text-xs font-mono text-destructive border border-destructive/30 rounded px-2 py-0.5">
-                        {filtered.length} conflicts
-                    </span>
+                    {!loading && (
+                        <span className="text-xs font-mono text-destructive border border-destructive/30 rounded px-2 py-0.5">
+                            {filtered.length} conflict{filtered.length !== 1 ? "s" : ""}
+                        </span>
+                    )}
                 </div>
                 <div className="flex gap-2">
                     <div className="relative">
@@ -88,11 +92,18 @@ export default function DiscordancePage() {
                             onChange={(e) => setSearchQuery(e.target.value)}
                         />
                     </div>
-                    <Button variant="outline" size="icon" className="shrink-0">
-                        <Filter className="h-4 w-4" />
+                    <Button variant="outline" size="icon" className="shrink-0" onClick={fetchDiscordances} disabled={loading}>
+                        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Filter className="h-4 w-4" />}
                     </Button>
                 </div>
             </div>
+
+            {error && (
+                <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    {error}
+                </div>
+            )}
 
             {/* Table */}
             <div className="rounded-xl border border-border overflow-hidden">
@@ -101,44 +112,63 @@ export default function DiscordancePage() {
                         <TableRow className="border-b border-border hover:bg-transparent">
                             <TableHead className="h-10 px-5 font-medium text-xs uppercase tracking-wider">Drug</TableHead>
                             <TableHead className="h-10 px-4 font-medium text-xs uppercase tracking-wider">Payer</TableHead>
-                            <TableHead className="h-10 px-4 font-medium text-xs uppercase tracking-wider">Criterion</TableHead>
-                            <TableHead className="h-10 px-4 font-medium text-xs uppercase tracking-wider">Med. Benefit</TableHead>
-                            <TableHead className="h-10 px-4 font-medium text-xs uppercase tracking-wider">Pharm. Benefit</TableHead>
-                            <TableHead className="h-10 px-4 font-medium text-xs uppercase tracking-wider">Winner</TableHead>
+                            <TableHead className="h-10 px-4 font-medium text-xs uppercase tracking-wider">Summary</TableHead>
+                            <TableHead className="h-10 px-4 font-medium text-xs uppercase tracking-wider">Severity</TableHead>
+                            <TableHead className="h-10 px-4 font-medium text-xs uppercase tracking-wider">Conflicts</TableHead>
                             <TableHead className="h-10 px-4 w-10" />
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {filtered.map((item) => (
-                            <TableRow key={item.id} className="border-border hover:bg-white/[0.02]">
-                                <TableCell className="h-12 px-5 font-medium text-sm">{item.drug}</TableCell>
-                                <TableCell className="h-12 px-4 text-sm text-muted-foreground">{item.payer}</TableCell>
-                                <TableCell className="h-12 px-4">
-                                    <span className="text-xs font-mono text-muted-foreground border border-border rounded px-2 py-0.5">
-                                        {item.criterion}
-                                    </span>
-                                </TableCell>
-                                <TableCell className={`h-14 px-4 text-sm font-medium ${sevColor(item.medical.sev)}`}>
-                                    {item.medical.val}
-                                </TableCell>
-                                <TableCell className={`h-14 px-4 text-sm font-medium ${sevColor(item.pharmacy.sev)}`}>
-                                    {item.pharmacy.val}
-                                </TableCell>
-                                <TableCell className="h-14 px-4">
-                                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${item.mostRestrictive === "medical"
-                                        ? "border-red-500/30 text-red-400 bg-red-500/5"
-                                        : "border-amber-500/30 text-amber-400 bg-amber-500/5"
-                                        }`}>
-                                        {item.mostRestrictive === "medical" ? "Medical" : "Pharmacy"}
-                                    </span>
-                                </TableCell>
-                                <TableCell className="h-14 px-4">
-                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground">
-                                        <ArrowRight className="h-3.5 w-3.5" />
-                                    </Button>
+                        {loading ? (
+                            Array.from({ length: 4 }).map((_, i) => (
+                                <TableRow key={i} className="border-border">
+                                    <TableCell className="h-12 px-5"><Skeleton className="h-4 w-24" /></TableCell>
+                                    <TableCell className="h-12 px-4"><Skeleton className="h-4 w-20" /></TableCell>
+                                    <TableCell className="h-12 px-4"><Skeleton className="h-4 w-48" /></TableCell>
+                                    <TableCell className="h-12 px-4"><Skeleton className="h-4 w-12" /></TableCell>
+                                    <TableCell className="h-12 px-4"><Skeleton className="h-4 w-8" /></TableCell>
+                                    <TableCell className="h-12 px-4" />
+                                </TableRow>
+                            ))
+                        ) : filtered.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={6} className="h-32 text-center text-sm text-muted-foreground">
+                                    {discordances.length === 0
+                                        ? "No discordance alerts detected. Upload both medical and pharmacy benefit policies for the same drug to enable analysis."
+                                        : "No results match your filter."
+                                    }
                                 </TableCell>
                             </TableRow>
-                        ))}
+                        ) : (
+                            filtered.map((item) => {
+                                const sev = scoreSeverity(item.discordanceScore);
+                                return (
+                                    <TableRow key={`${item.drugName}-${item.payerName}`} className="border-border hover:bg-white/[0.02]">
+                                        <TableCell className="h-12 px-5 font-medium text-sm">{item.drugName}</TableCell>
+                                        <TableCell className="h-12 px-4 text-sm text-muted-foreground">{item.payerName}</TableCell>
+                                        <TableCell className="h-12 px-4 text-sm text-muted-foreground max-w-xs">
+                                            <p className="line-clamp-2">{item.summary}</p>
+                                        </TableCell>
+                                        <TableCell className={`h-12 px-4 text-sm font-medium ${sev.cls}`}>
+                                            {sev.label}
+                                            {item.discordanceScore != null && (
+                                                <span className="text-xs font-mono ml-1 opacity-60">
+                                                    ({Math.round(item.discordanceScore * 100)}%)
+                                                </span>
+                                            )}
+                                        </TableCell>
+                                        <TableCell className="h-12 px-4 text-sm font-mono text-muted-foreground">
+                                            {item.changesCount ?? "—"}
+                                        </TableCell>
+                                        <TableCell className="h-12 px-4">
+                                            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground">
+                                                <ArrowRight className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })
+                        )}
                     </TableBody>
                 </Table>
             </div>
