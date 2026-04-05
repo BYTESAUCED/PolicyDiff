@@ -76,17 +76,26 @@ export default function PolicyUploadPage() {
         setUploadState("creating");
 
         try {
-            // Step 1: Get presigned URL (also creates the DynamoDB record)
-            const presign = await apiFetch<PresignResponse>("/api/policies/upload-url", {
-                method: "POST",
-                body: JSON.stringify({
-                    payerName: payerRef.current?.value,
-                    planType: planTypeRef.current?.value,
-                    documentTitle: titleRef.current?.value,
-                    effectiveDate: dateRef.current?.value,
-                }),
-            });
-
+            // Step 1: Get presigned URL — also checks for duplicates
+            let presign: PresignResponse;
+            try {
+                presign = await apiFetch<PresignResponse>("/api/policies/upload-url", {
+                    method: "POST",
+                    body: JSON.stringify({
+                        payerName: payerRef.current?.value,
+                        planType: planTypeRef.current?.value,
+                        documentTitle: titleRef.current?.value,
+                        effectiveDate: dateRef.current?.value,
+                    }),
+                });
+            } catch (e) {
+                if (e instanceof ApiError && e.status === 409) {
+                    setErrorMsg("A policy with the same payer, title, and effective date already exists. Delete the existing one first or change the effective date.");
+                    setUploadState("error");
+                    return;
+                }
+                throw e;
+            }
             setPolicyDocId(presign.policyDocId);
             setUploadState("uploading");
 

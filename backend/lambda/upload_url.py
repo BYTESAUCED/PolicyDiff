@@ -67,6 +67,36 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         policy_doc_id = str(uuid.uuid4())
         s3_key = f"raw/{policy_doc_id}/raw.pdf"
 
+        # ── Duplicate detection ───────────────────────────────────────────────
+        # Check if a non-deleted policy with same payer + title + effectiveDate exists
+        payer_name = body.get("payerName", "")
+        document_title = body.get("documentTitle", "")
+        effective_date = body.get("effectiveDate", "")
+
+        if payer_name and effective_date:
+            try:
+                from boto3.dynamodb.conditions import Key as DKey
+                table = dynamodb.Table(table_name)
+                existing = table.query(
+                    IndexName="payerName-effectiveDate-index",
+                    KeyConditionExpression=DKey("payerName").eq(payer_name) & DKey("effectiveDate").eq(effective_date),
+                    Limit=10,
+                )
+                for item in existing.get("Items", []):
+                    if (
+                        item.get("extractionStatus") not in ("deleted", "PENDING")
+                        and item.get("documentTitle", "").lower() == document_title.lower()
+                    ):
+                        logger.info(json.dumps({"action": "duplicate_detected", "existingId": item["policyDocId"]}))
+                        return create_response(409, {
+                            "message": "A policy with the same payer, title, and effective date already exists.",
+                            "existingPolicyDocId": item["policyDocId"],
+                            "duplicate": True,
+                        })
+            except Exception as e:
+                logger.warning(json.dumps({"warning": "duplicate_check_failed", "detail": str(e)}))
+        # ─────────────────────────────────────────────────────────────────────
+
         # ADR: ContentLength not enforceable on presigned PUT | Use S3 Object Lambda or bucket policy for size limits
         # Max 50MB enforced client-side; server-side enforcement requires presigned POST (not PUT)
         upload_url = s3_client.generate_presigned_url(
