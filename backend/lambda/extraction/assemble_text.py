@@ -937,18 +937,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     )
     logger.info(f"Wrote structured text to s3://{s3_bucket}/{structured_key}")
 
-    if boilerplate_stripped:
-        try:
-            dynamodb = boto3.resource("dynamodb")
-            table = dynamodb.Table(os.environ.get("POLICY_DOCUMENTS_TABLE", "PolicyDocuments"))
-            table.update_item(
-                Key={"policyDocId": policy_doc_id},
-                UpdateExpression="SET boilerplateStripped = :b",
-                ExpressionAttributeValues={":b": True},
-            )
-        except Exception as e:
-            logger.warning(f"Failed to update boilerplate flag: {e}")
-
     return {
         **event,
         "policyDocId": policy_doc_id,
