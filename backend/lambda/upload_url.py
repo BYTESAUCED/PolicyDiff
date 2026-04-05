@@ -16,6 +16,8 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
+CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "*")
+
 # Validate env vars at module load; fail fast on cold start if missing
 _BUCKET_NAME = os.environ.get("DOCUMENTS_BUCKET_NAME")
 if not _BUCKET_NAME:
@@ -34,7 +36,7 @@ def create_response(status_code: int, body: dict) -> dict:
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": CORS_ORIGIN,
             "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
             "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
         },
