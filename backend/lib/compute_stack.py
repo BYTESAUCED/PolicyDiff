@@ -498,36 +498,31 @@ class PolicyDiffComputeStack(cdk.Stack):
         assemble_text = sfn_tasks.LambdaInvoke(
             self, "AssembleStructuredText",
             lambda_function=self.assemble_text_fn,
-            result_selector={"Payload.$": "$.Payload"},
-            result_path="$",
+            output_path="$.Payload",
         )
 
         classify_document = sfn_tasks.LambdaInvoke(
             self, "ClassifyDocument",
             lambda_function=self.classify_document_fn,
-            result_selector={"Payload.$": "$.Payload"},
-            result_path="$",
+            output_path="$.Payload",
         )
 
         bedrock_extraction = sfn_tasks.LambdaInvoke(
             self, "BedrockSchemaExtraction",
             lambda_function=self.bedrock_extract_fn,
-            result_selector={"Payload.$": "$.Payload"},
-            result_path="$",
+            output_path="$.Payload",
         )
 
         confidence_scoring = sfn_tasks.LambdaInvoke(
             self, "ConfidenceScoring",
             lambda_function=self.confidence_score_fn,
-            result_selector={"Payload.$": "$.Payload"},
-            result_path="$",
+            output_path="$.Payload",
         )
 
         write_to_dynamo = sfn_tasks.LambdaInvoke(
             self, "WriteToDynamoDB",
             lambda_function=self.write_criteria_fn,
-            result_selector={"Payload.$": "$.Payload"},
-            result_path="$",
+            output_path="$.Payload",
         )
 
         execution_complete = sfn.Succeed(self, "ExecutionComplete")
@@ -536,16 +531,14 @@ class PolicyDiffComputeStack(cdk.Stack):
         trigger_diff_state = sfn_tasks.LambdaInvoke(
             self, "TriggerDiffIfVersionExists",
             lambda_function=self.trigger_diff_fn,
-            result_selector={"Payload.$": "$.Payload"},
-            result_path="$",
+            output_path="$.Payload",
         )
 
         # State 6.5 — EmbedAndIndex (non-blocking: catches all errors and continues)
         embed_and_index = sfn_tasks.LambdaInvoke(
             self, "EmbedAndIndex",
             lambda_function=self.embed_index_fn,
-            result_selector={"Payload.$": "$.Payload"},
-            result_path="$",
+            output_path="$.Payload",
         )
         embed_and_index.add_catch(
             trigger_diff_state,
